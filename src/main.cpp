@@ -263,8 +263,6 @@ void setup() {
   beep();
   delay(500);
 
-
-
   Log(SETUP_END_MESSAGE);
 }
 
