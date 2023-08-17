@@ -35,7 +35,7 @@
 #define BMP_OK_MESSAGE                "BMP280 OK!" 
 #define LORA_STARTED_MESSAGE          "Lora Started!"
 
-#define iNIT_DIR_MESSAGE              "Iniciando Diretorio"
+#define INIT_DIR_MESSAGE              "Iniciando Diretorio"
 #define CREATING_DIR_MESSAGE          "Criando Diretorio "
 #define DIR_CREATED_MESSAGE           "Diretorio Criado" 
 #define CREATING_FILE_MESSAGE         "Criando Arquivo "
@@ -696,7 +696,7 @@ void handle_SerialPrintData() {
 void init_Dir() {
   // Para criar um novo directorio e arquivo toda vez que ligar a placa
   // mantendo os dados antigos e salvando separado
-  Log(iNIT_DIR_MESSAGE);
+  Log(INIT_DIR_MESSAGE);
   root = SD.open(ROOT_DIR);
   int nDir = 0;
 
