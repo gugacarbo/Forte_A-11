@@ -235,6 +235,14 @@ void LoraPrintParameter(struct Configuration configuration);
 void LoraSendMessage(String message);
 
 void setup() {
+
+  pinMode(RECOVERY_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BATTERY_SENSOR_PIN, INPUT);
+
+  beep(5, 75);
+  delay(800);
+
 #if DEBUG
   Serial.begin(115200); //INICIALIZA A SERIAL
 #else
@@ -243,25 +251,19 @@ void setup() {
   delay(100);
 #endif
 
-  init_Dir();
-  beep(5, 75);
-
   Log(SYSYEM_START_MESSAGE);
 
-  pinMode(RECOVERY_PIN, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(BATTERY_SENSOR_PIN, INPUT);
-
-  beep(3, 100);
-  delay(1000);
+  init_Dir();
+  beep();
+  delay(800);
 
   init_Sensors();
   beep();
   delay(500);
 
   set_AltitudeOffset();
-  beep();
-  delay(500);
+  beep(3, 100);
+  delay(1000);
 
   Log(SETUP_END_MESSAGE);
 }
