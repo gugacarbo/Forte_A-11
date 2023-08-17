@@ -9,14 +9,14 @@
 #include <MPU9250.h> 
 #include <TinyGPSPlus.h>
 
-//Defines
+//---- System Defines -----
 #define LOG_MESSAGE false
 #define LOG_ERROR true
-#define DEBUG_OFF false
 #define DEBUG_ON true
+#define DEBUG_OFF false
+#define DEBUG_LORA false
 #define DEBUG_VERBOSE 2
 #define SEALEVELPRESSURE_HPA (1018.0)
-#define ROCKET_NAME "Forte A11"
 
 //Fatal Errors Ids
 #define BMP_ERROR           1
@@ -29,86 +29,99 @@
 #define FILE_OPEN_ERROR     8
 
 //Log Messages
-#define SYSYEM_START_MESSAGE    "Avionic Board Starting"
-#define SETUP_END_MESSAGE       "Setup Complete"
-#define BMP_ERROR_MESSAGE       "BMP280 não foi identificado!"
-#define BMP_OK_MESSAGE          "BMP280 identificado!" 
-#define SD_MOUNT_ERROR_MESSAGE  "Card Mount Failed" 
-#define NO_SD_ERROR_MESSAGE     "No SD card attached"
-#define MPU_ERROR_MESSAGE       "MPU9250 não foi identificado!"
-#define LORA_STARTED_MESSAGE    "Lora Started!"
-#define FLIGHT_START_MESSAGE    "Flight Started"
-#define GOAL_REACHED_MESSAGE    "Goal Reached"
-#define RECOVERY_START_MESSAGE  "Recovery Activated"
-#define ALTITUDE_ERROR_MESSAGE  "Altitude Read Error"
-#define GPS_ERROR_MESSAGE       "GPS Error, Invalid Location" 
-#define OFFSET_ALTITUDE_MESSAGE "Altitude Atual: "
-#define INIT_DIR_MESSAGE        "Iniciando Diretorio"
-#define CREATING_DIR_MESSAGE    "Criando Diretorio "
-#define DIR_CREATED_MESSAGE     "Diretorio Criado" 
-#define CREATING_FILE_MESSAGE   "Criando Arquivo "
-#define FILE_CREATED_MESSAGE    "Arquivo Criado" 
-#define OPEN_FILE_ERROR_MESSAGE "Failed to open file for appending "    
+#define SYSYEM_START_MESSAGE          "Avionic Board Starting"
+#define SETUP_END_MESSAGE             "Setup Complete"
+
+#define BMP_OK_MESSAGE                "BMP280 OK!" 
+#define LORA_STARTED_MESSAGE          "Lora Started!"
+
+#define iNIT_DIR_MESSAGE              "Iniciando Diretorio"
+#define CREATING_DIR_MESSAGE          "Criando Diretorio "
+#define DIR_CREATED_MESSAGE           "Diretorio Criado" 
+#define CREATING_FILE_MESSAGE         "Criando Arquivo "
+#define FILE_CREATED_MESSAGE          "Arquivo Criado" 
 #define SET_ALTTITUDE_OFFSET_MESSAGE  "Seting Altitude Offset"
+#define OFFSET_ALTITUDE_MESSAGE       "Altitude Atual:"
+
+#define BMP_ERROR_MESSAGE             "BMP280 init failed!"
+#define MPU_ERROR_MESSAGE             "MPU9250 init failed!"
+#define SD_MOUNT_ERROR_MESSAGE        "SD Mount init failed!" 
+#define NO_SD_ERROR_MESSAGE           "NO SD"
+#define ALTITUDE_ERROR_MESSAGE        "Altitude Read Error"
+#define GPS_ERROR_MESSAGE             "GPS Error, Invalid Location" 
+#define OPEN_FILE_ERROR_MESSAGE       "Failed to open file for appending"    
 #define DIR_CREATION_ERROR_MESSAGE    "Erro ao Criar Diretorio" 
-#define CREATE_FILE_ERROR_MESSAGE     "Erro ao Criar Arquivo " 
+#define CREATE_FILE_ERROR_MESSAGE     "Erro ao Criar Arquivo" 
 #define WRITE_FILE_ERROR_MESSAGE      "Erro ao Escrever no Arquivo"
 #define LORA_SEND_ERROR_MESSAGE       "Erro ao Enviar por Lora"
 
-//Toggle Debug Serial Logs DEBUG_ON / DEBUG_OFF / DEBUG_VERBOSE
-#define DEBUG DEBUG_VERBOSE
-
-//Sensors I2C (MPU, BMP280)
-#define I2C_SDA   21
-#define I2C_SCL   22
-
-//SD SPI
-#define SD_CS    5
-#define SD_MOSI  23
-#define SD_CLK   18
-#define SD_MISO  19
-
-//GPS Serial2 UART
-#define GPS_RX  16
-#define GPS_TX  17
-
-//Lora Serial0 Uart
-#define LORA_RX         3 //? Serial0 RX
-#define LORA_TX         1 //? Serial0 TX
-
-//Lora Config
-#define LORA_AuxPin     0 //?
-#define LORA_M0         0 //?
-#define LORA_M1         0 //?
-UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
-
-#define LORA_ADDH  0x00
-#define LORA_ADDL  0x05    
-#define LORA_CHAN  0x17 
-#define LORA_FixedTransmission  FT_FIXED_TRANSMISSION
-#define LORA_WirelessWakeupTime  WAKE_UP_250
-#define LORA_Fec  FEC_1_ON                            
-#define LORA_IoDriveMode  IO_D_MODE_PUSH_PULLS_PULL_UPS // IO_D_MODE_PUSH_PULLS
-#define LORA_TransmissionPower  POWER_20                //20dBm
-#define LORA_AirDataRate  AIR_DATA_RATE_010_24          //2.4kbps (default)
-#define LORA_UartBaudRate  LORA_BAUDRATE            
-#define LORA_UaartParity  MODE_00_8N1 
+#define FLIGHT_START_MESSAGE          "Flight Started"
+#define GOAL_REACHED_MESSAGE          "Goal Reached"
+#define RECOVERY_START_MESSAGE        "Recovery Activated"
 
 
+//---- End System Defines -----
+
+//---- Flight Configuration -----
+#define ROCKET_NAME "Forte A11"
+
+//Toggle Debug Serial Logs DEBUG_ON / DEBUG_VERBOSE / (DEBUG_OFF == DEBUG_LORA)
+#define DEBUG DEBUG_VERBOSE 
 
 //Flight Config
-#define ROCKET_GOAL               500.0 //m
-#define FLIGHT_START_ALTITUDE     10.0  //m
-#define FLIGHT_START_AFTER        11000 //ms
-#define RECOVERY_DEPLOY_ALTITUDE  400.0 //m
-#define RECOVERY_PIN              4     //same as old servo (D4)
+#define ROCKET_GOAL                   500.0 //m
+#define FLIGHT_START_ALTITUDE         10.0  //m
+#define RECOVERY_DEPLOY_MIN_ALTITUDE  400.0 //m
+#define RECOVER_AFTER_LAUNCH_MAX_TIME 11000 //ms
+
+#define RECOVERY_PIN              -1 // ? Não tem Pino Definido
+
+//Battery
+#define BATTERY_MAX_VOLTAGE        7.4 //V
+#define BATTERY_MIN_VOLTAGE        6.0 //V
+#define BATTERY_SENSOR_PIN         35  //Pin
 
 //Files
-#define ROOT_DIR           "/"
-#define FOLDER_NAME        "flight_record"  //ROOT_DIR + "/" + FOLDER_NAME
-#define DATA_FILE_NAME     "data"           //.csv
-#define ALTITUDE_FILE_NAME "altitude"       //.csv
-#define LOG_FILE_NAME      "log"            //.csv
+#define ROOT_DIR                "/"
+#define FOLDER_NAME             "flight_record"  //ROOT_DIR + "/" + FOLDER_NAME
+#define DATA_FILE_NAME          "sensors"        //.csv
+#define ALTITUDE_FILE_NAME      "altitude"       //.csv
+#define LOG_FILE_NAME           "log"            //.csv
+
+//Sensors I2C (MPU, BMP280)
+#define I2C_SDA         21
+#define I2C_SCL         22
+
+//SD SPI
+#define SD_CS           5
+#define SD_MOSI         23
+#define SD_CLK          18
+#define SD_MISO         19
+
+//Lora Serial0 Uart
+#define LORA_RX         3 // Serial0 RX
+#define LORA_TX         1 // Serial0 TX
+
+//GPS Serial2 UART
+#define GPS_RX          16 // Serial2 RX
+#define GPS_TX          17 // Serial2 TX
+
+//Lora Config
+UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
+#define LORA_AuxPin             15
+#define LORA_M0                 2  
+#define LORA_M1                 4  
+#define LORA_ADDH               0x00
+#define LORA_ADDL               0x05    
+#define LORA_CHAN               0x17 
+#define LORA_FixedTransmission  FT_FIXED_TRANSMISSION         //FIXED TRANSMISSION
+#define LORA_WirelessWakeupTime WAKE_UP_250                   //250ms
+#define LORA_IoDriveMode        IO_D_MODE_PUSH_PULLS_PULL_UPS // IO_D_MODE_PUSH_PULLS
+#define LORA_TransmissionPower  POWER_20                      //20dBm
+#define LORA_AirDataRate        AIR_DATA_RATE_010_24          //2.4kbps (default)
+#define LORA_UartBaudRate       LORA_BAUDRATE                 //9600
+#define LORA_Fec                FEC_1_ON                      //FEC
+#define LORA_UaartParity        MODE_00_8N1                   //No Parity
 
 //BUZZER
 #define BUZZER_PIN              34  //Pin
@@ -120,14 +133,18 @@ UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
 #define DATA_INTERVAL_TIME      500 //ms
 #define ALTITUDE_INTERVAL_DELAY 200 //ms
 
-//Variables
+//Var
 bool flightStarted = false;
 bool goalReached = false;
-bool recovering = false;
+bool startRecovery = false;
+
 float altitudeOffset = 0;
 float apogee = 0;
-unsigned long current_time = 0;
+
 unsigned long flightStarted_Time_offset = 0;
+
+unsigned long current_time = 0;
+float current_batteryCharge = 0.0;
 
 //BPM
 float current_altitude;
@@ -166,15 +183,19 @@ CircularBuffer <float, 6> altitudeBuffer;
 
 LoRa_E32 LoraTransmitter(LORA_RX, LORA_TX, &Serial, LORA_AuxPin, LORA_BAUDRATE);
 
-
 //Functions
 void beep(int times = 1, int beeps_interval = 0, int time = BUZZER_BEEP_TIME);
 void Log(const String& Message, bool isError = false, bool append = true);
 void Error(int e);
 
-void Init_Sensors();
+void init_Sensors();
+void initLora();
+void initGPS();
+void initAccelerometer();
+void initAltimeter();
+void initSd();
 
-void Init_Dir();
+void init_Dir();
 void createDir(fs::FS& fs, const char* path);
 bool createFile(fs::FS& fs, const char* path, const char* message);
 void appendToFile(fs::FS& fs, const char* path, const char* message);
@@ -197,6 +218,7 @@ float get_AccX();
 float get_AccY();
 float get_AccZ();
 
+void get_BatteryCharge();
 
 void set_AltitudeOffset();
 
@@ -207,7 +229,7 @@ void handle_Recovery();
 bool isFalling();
 void activateRecovery();
 
-void handle_SerialLogData();
+void handle_SerialPrintData();
 void printAccelerometerCalibration();
 void LoraPrintParameter(struct Configuration configuration);
 void LoraSendMessage(String message);
@@ -215,17 +237,25 @@ void LoraSendMessage(String message);
 void setup() {
 #if DEBUG
   Serial.begin(115200); //INICIALIZA A SERIAL
+#else
+//Lora
+  initLora();
+  delay(100);
 #endif
+
+  init_Dir();
+  beep(5, 75);
+
   Log(SYSYEM_START_MESSAGE);
 
-  Serial2.begin(9600);
   pinMode(RECOVERY_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BATTERY_SENSOR_PIN, INPUT);
 
   beep(3, 100);
   delay(1000);
 
-  Init_Sensors();
+  init_Sensors();
   beep();
   delay(500);
 
@@ -233,8 +263,7 @@ void setup() {
   beep();
   delay(500);
 
-  Init_Dir();
-  beep(5, 75);
+
 
   Log(SETUP_END_MESSAGE);
 }
@@ -248,12 +277,13 @@ void loop() {
     get_Position();
     get_Temperature();
     get_Pressure();
+    get_BatteryCharge();
+
+    handle_SerialPrintData();
 
     if (flightStarted) {
       SD_SaveFlightData();
     }
-
-    handle_SerialLogData();
 
     dataInterval_time = millis();
   }
@@ -262,96 +292,12 @@ void loop() {
   if (flightStarted && millis() - altitudeInterval_time >= ALTITUDE_INTERVAL_DELAY) {
     get_Altitude();
     SD_SaveAltitude();
+
     altitudeInterval_time = millis();
   }
 }
 
 //Functions
-//Sensors
-void Init_Sensors() {
-  //I2C
-  Wire.begin();
-
-  //GPS
-  Serial2.begin(9600);
-  //BMP
-  if (!bmp.begin(0x76)) {
-    Log(BMP_ERROR_MESSAGE, LOG_ERROR);
-    Error(BMP_ERROR);
-  }
-
-  //SD
-  if (!SD.begin(5)) {
-    Log(SD_MOUNT_ERROR_MESSAGE, LOG_ERROR);
-    Error(SD_MOUNT_ERROR);
-  }
-  if (SD.cardType() == CARD_NONE) {
-    Log(NO_SD_ERROR_MESSAGE, LOG_ERROR);
-    Error(NO_SD_ERROR);
-  }
-
-  //MPU
-  delay(2000);
-
-  MPU9250Setting setting;
-  setting.accel_fs_sel = ACCEL_FS_SEL::A16G;
-  setting.gyro_fs_sel = GYRO_FS_SEL::G2000DPS;
-  setting.mag_output_bits = MAG_OUTPUT_BITS::M16BITS;
-  setting.fifo_sample_rate = FIFO_SAMPLE_RATE::SMPL_200HZ;
-  setting.gyro_fchoice = 0x03;
-  setting.gyro_dlpf_cfg = GYRO_DLPF_CFG::DLPF_41HZ;
-  setting.accel_fchoice = 0x01;
-  setting.accel_dlpf_cfg = ACCEL_DLPF_CFG::DLPF_45HZ;
-
-
-  if (!mpu.setup(0x68, setting)) {
-    Log(MPU_ERROR_MESSAGE, LOG_ERROR);
-    Error(MPU_ERROR);
-  }
-
-  mpu.verbose(true);
-  mpu.calibrateAccelGyro();
-  printAccelerometerCalibration();
-  mpu.verbose(false);
-
-  //Loradelay(100);
-
-  LoraTransmitter.begin();
-  LoraTransmitter.setMode(MODE_3_SLEEP);
-
-    // After set configuration comment set M0 and M1 to low
-    // and reboot if you directly set HIGH M0 and M1 to program
-  ResponseStructContainer c;
-  c = LoraTransmitter.getConfiguration();
-  Configuration configuration = *(Configuration*)c.data;
-  LoraPrintParameter(configuration);
-
-  configuration.ADDL = LORA_ADDL;
-  configuration.ADDH = LORA_ADDH;
-  configuration.CHAN = LORA_CHAN;
-  configuration.OPTION.fixedTransmission = LORA_FixedTransmission;
-  configuration.OPTION.wirelessWakeupTime = LORA_WirelessWakeupTime;
-
-  configuration.OPTION.fec = LORA_Fec;
-  configuration.OPTION.ioDriveMode = LORA_IoDriveMode;
-  configuration.OPTION.transmissionPower = LORA_TransmissionPower;
-
-  configuration.SPED.airDataRate = LORA_AirDataRate;
-  configuration.SPED.uartBaudRate = LORA_UartBaudRate;
-  configuration.SPED.uartParity = LORA_UaartParity;
-
-  LoraTransmitter.setConfiguration(configuration, WRITE_CFG_PWR_DWN_SAVE);
-  LoraPrintParameter(configuration);
-
-  LoraTransmitter.resetModule();
-
-  delay(1000);
-  LoraTransmitter.setMode(MODE_0_NORMAL);
-  delay(1000);
-
-  Log(LORA_STARTED_MESSAGE);
-
-}
 
 //Check if Rocket started to Rising
 void handle_FlightStart() {
@@ -403,47 +349,135 @@ void handle_Apogee() {
 
 //Check if Recovery
 void handle_Recovery() {
-  if (flightStarted) {
-    if (!recovering) {
-      if (current_time > FLIGHT_START_AFTER) {
-        recovering = true;
-      }
+  if (!startRecovery) {
 
-      if (isFalling()) {
-        if (apogee <= RECOVERY_DEPLOY_ALTITUDE) {
-          recovering = true;
+    if (current_time > RECOVER_AFTER_LAUNCH_MAX_TIME) {
+      startRecovery = true;
+    }
+
+    if (isFalling()) {
+      int cont = 0;
+      using index_t = decltype(altitudeBuffer)::index_t;
+      for (index_t i = 0; i < altitudeBuffer.size() - 3; i++) {
+        if (altitudeBuffer[i] < RECOVERY_DEPLOY_MIN_ALTITUDE) {
+          cont += 1;
         }
-        else {
-
-          int cont = 0;
-          using index_t = decltype(altitudeBuffer)::index_t;
-          for (index_t i = 0; i < altitudeBuffer.size() - 3; i++) {
-            if (altitudeBuffer[i] < RECOVERY_DEPLOY_ALTITUDE) {
-              cont += 1;
-            }
-            if (cont >= 3) {
-              recovering = true;
-            }
-          }
+        if (cont >= 3) {
+          startRecovery = true;
         }
-      }
-      else {
-        recovering = true;
-      }
-
-      if (recovering) {
-        Log(RECOVERY_START_MESSAGE);
       }
     }
 
-    if (recovering) {
-      activateRecovery();
+    if (startRecovery) {
+      Log(RECOVERY_START_MESSAGE);
     }
+  }
+  else {
+    activateRecovery();
   }
 }
 
-//Activate Recovery
 void activateRecovery() {
+}
+
+void init_Sensors() {
+//I2C Begin
+  Wire.begin();
+
+  initSd();
+  delay(100);
+  initAltimeter();
+  delay(100);
+  initGPS();
+  delay(100);
+  initAccelerometer();
+  delay(100);
+}
+
+void initSd() {
+  //SD
+  if (!SD.begin(5)) {
+    Log(SD_MOUNT_ERROR_MESSAGE, LOG_ERROR);
+    Error(SD_MOUNT_ERROR);
+  }
+  if (SD.cardType() == CARD_NONE) {
+    Log(NO_SD_ERROR_MESSAGE, LOG_ERROR);
+    Error(NO_SD_ERROR);
+  }
+}
+
+void initGPS() {
+  //GPS
+  Serial2.begin(9600);
+}
+
+void initAccelerometer() {
+  //MPU
+  MPU9250Setting setting;
+  setting.accel_fs_sel = ACCEL_FS_SEL::A16G;
+  setting.gyro_fs_sel = GYRO_FS_SEL::G2000DPS;
+  setting.mag_output_bits = MAG_OUTPUT_BITS::M16BITS;
+  setting.fifo_sample_rate = FIFO_SAMPLE_RATE::SMPL_200HZ;
+  setting.gyro_fchoice = 0x03;
+  setting.gyro_dlpf_cfg = GYRO_DLPF_CFG::DLPF_41HZ;
+  setting.accel_fchoice = 0x01;
+  setting.accel_dlpf_cfg = ACCEL_DLPF_CFG::DLPF_45HZ;
+
+
+  if (!mpu.setup(0x68, setting)) {
+    Log(MPU_ERROR_MESSAGE, LOG_ERROR);
+    Error(MPU_ERROR);
+  }
+  mpu.verbose(true);
+  mpu.calibrateAccelGyro();
+  printAccelerometerCalibration();
+  mpu.verbose(false);
+
+}
+
+void initAltimeter() {
+  //BMP280
+  if (!bmp.begin(0x76)) {
+    Log(BMP_ERROR_MESSAGE, LOG_ERROR);
+    Error(BMP_ERROR);
+  }
+}
+
+void initLora() {
+  LoraTransmitter.begin();
+  LoraTransmitter.setMode(MODE_3_SLEEP);
+
+  // After set configuration comment set M0 and M1 to low
+  // and reboot if you directly set HIGH M0 and M1 to program
+  ResponseStructContainer c;
+  c = LoraTransmitter.getConfiguration();
+  Configuration configuration = *(Configuration*)c.data;
+  LoraPrintParameter(configuration);
+
+  configuration.ADDL = LORA_ADDL;
+  configuration.ADDH = LORA_ADDH;
+  configuration.CHAN = LORA_CHAN;
+  configuration.OPTION.fixedTransmission = LORA_FixedTransmission;
+  configuration.OPTION.wirelessWakeupTime = LORA_WirelessWakeupTime;
+
+  configuration.OPTION.fec = LORA_Fec;
+  configuration.OPTION.ioDriveMode = LORA_IoDriveMode;
+  configuration.OPTION.transmissionPower = LORA_TransmissionPower;
+
+  configuration.SPED.airDataRate = LORA_AirDataRate;
+  configuration.SPED.uartBaudRate = LORA_UartBaudRate;
+  configuration.SPED.uartParity = LORA_UaartParity;
+
+  LoraTransmitter.setConfiguration(configuration, WRITE_CFG_PWR_DWN_SAVE);
+  LoraPrintParameter(configuration);
+
+  LoraTransmitter.resetModule();
+
+  delay(1000);
+  LoraTransmitter.setMode(MODE_0_NORMAL);
+  delay(1000);
+
+  Log(LORA_STARTED_MESSAGE);
 }
 
 //Get Altitude and saves on Buffer
@@ -531,12 +565,21 @@ void get_Coordenates() {
   }
 }
 
+// BATTERY_MIN_VOLTAGE = 0%
+// BATTERY_MAX_VOLTAGE = 100%
+void get_BatteryCharge() {
+  float reading = analogRead(BATTERY_SENSOR_PIN);
+  float voltage = (reading * BATTERY_MAX_VOLTAGE) / 1023.0;
+  float percent = (voltage - BATTERY_MIN_VOLTAGE) / (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE) * 100;
+  current_batteryCharge = percent;
+}
+
 //Set Altitude Offset
 void set_AltitudeOffset() {
   Log(SET_ALTTITUDE_OFFSET_MESSAGE);
   for (int i = 0; i < 10; i++) {
     altitudeOffset += (0.1 * bmp.readAltitude(SEALEVELPRESSURE_HPA));
-    delay(50);
+    delay(100);
   }
   Log(OFFSET_ALTITUDE_MESSAGE + String(altitudeOffset));
   return;
@@ -563,11 +606,99 @@ bool isFalling() {
   return true;
 }
 
+//Send Message via Lora
+void LoraSendMessage(String message) {
+  ResponseStatus rs = LoraTransmitter.sendMessage(message);
+
+  if (rs.getResponseDescription() == "Success") {
+#if DEBUG == DEBUG_VERBOSE
+    Log("Message Sended" + message);
+#endif
+  }
+  else {
+    Log(LORA_SEND_ERROR_MESSAGE + rs.getResponseDescription(), LOG_ERROR);
+  }
+}
+
+//Save Data on SD 
+void SD_SaveFlightData() {
+
+  String dataMessage =
+    String(current_time) + ","
+    + String(current_altitude) + ","
+    + String(current_temperature) + ","
+    + String(current_pressure) + ","
+    + String(latitude) + ","
+    + String(longitude) + ","
+    + String(current_roll) + ","
+    + String(current_pitch) + ","
+    + String(current_yaw) + ","
+    + String(current_X_acceleration) + ","
+    + String(current_Y_acceleration) + ","
+    + String(current_Z_acceleration) + ","
+    + String(current_GyroX) + ","
+    + String(current_GyroY) + ","
+    + String(current_GyroZ) + ","
+    + String(apogee) + ","
+    + String(current_batteryCharge)
+    + "\n";
+  appendToFile(SD, dataFilePath.c_str(), dataMessage.c_str());
+}
+
+//Save Altitude on SD
+void SD_SaveAltitude() {
+  String dataMessage =
+    String(current_time) + ","
+    + String(current_altitude)
+    + "\n";
+  appendToFile(SD, altitudeFilePath.c_str(), dataMessage.c_str());
+}
+
+//Serial Print Data
+void handle_SerialPrintData() {
+#if DEBUG
+  //BPM
+  Serial.print("Temperatura:");
+  Serial.println(current_temperature);
+  Serial.print("Pressao: ");
+  Serial.println(current_pressure);
+  Serial.print("Altitude: ");
+  Serial.println(current_altitude);
+
+  Serial.print("Latitude: ");
+  Serial.println(latitude);
+  Serial.print("Longitude: ");
+  Serial.println(longitude);
+
+  Serial.print("Roll: ");
+  Serial.println(current_roll);
+  Serial.print("Pitch: ");
+  Serial.println(current_pitch);
+  Serial.print("Yaw: ");
+  Serial.println(current_yaw);
+#endif
+
+#if DEBUG == DEBUG_VERBOSE
+  Serial.print("X Acceleration: ");
+  Serial.println(current_X_acceleration);
+  Serial.print("Y Acceleration: ");
+  Serial.println(current_Y_acceleration);
+  Serial.print("Z Acceleration: ");
+  Serial.println(current_Z_acceleration);
+  Serial.print("Gyro X: ");
+  Serial.println(current_GyroX);
+  Serial.print("Gyro Y: ");
+  Serial.println(current_GyroY);
+  Serial.print("Gyro Z: ");
+  Serial.println(current_GyroZ);
+#endif
+}
+
 //Init Files
-void Init_Dir() {
+void init_Dir() {
   // Para criar um novo directorio e arquivo toda vez que ligar a placa
   // mantendo os dados antigos e salvando separado
-  Log(INIT_DIR_MESSAGE);
+  Log(iNIT_DIR_MESSAGE);
   root = SD.open(ROOT_DIR);
   int nDir = 0;
 
@@ -595,7 +726,8 @@ void Init_Dir() {
 
   //Cria file para dados dos sensores
   String filePath = Folder + DATA_FILE_NAME + ".csv";
-  createFile(SD, filePath.c_str(), "Tempo,Altitude,Temperatura,Pressao,latitude,longitude\n");
+  createFile(SD, filePath.c_str(), "Tempo,Altitude,Temperatura,Pressao,latitude,longitude,Roll,Pitch,Yaw,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Apogeu,Bateria\n");
+
   dataFilePath = filePath;
 
   //Cria file para altitude
@@ -668,46 +800,6 @@ void appendToFile(fs::FS& fs, const char* path, const char* message) {
   file.close();
 }
 
-//Serial Print Data
-void handle_SerialLogData() {
-#if DEBUG
-  //BPM
-  Serial.print("Temperatura:");
-  Serial.println(current_temperature);
-  Serial.print("Pressao: ");
-  Serial.println(current_pressure);
-  Serial.print("Altitude: ");
-  Serial.println(current_altitude);
-
-  Serial.print("Latitude: ");
-  Serial.println(latitude);
-  Serial.print("Longitude: ");
-  Serial.println(longitude);
-
-  Serial.print("Roll: ");
-  Serial.println(current_roll);
-  Serial.print("Pitch: ");
-  Serial.println(current_pitch);
-  Serial.print("Yaw: ");
-  Serial.println(current_yaw);
-#endif
-
-#if DEBUG == DEBUG_VERBOSE
-  Serial.print("X Acceleration: ");
-  Serial.println(current_X_acceleration);
-  Serial.print("Y Acceleration: ");
-  Serial.println(current_Y_acceleration);
-  Serial.print("Z Acceleration: ");
-  Serial.println(current_Z_acceleration);
-  Serial.print("Gyro X: ");
-  Serial.println(current_GyroX);
-  Serial.print("Gyro Y: ");
-  Serial.println(current_GyroY);
-  Serial.print("Gyro Z: ");
-  Serial.println(current_GyroZ);
-#endif
-}
-
 //Print Accelerometer Calibration
 void printAccelerometerCalibration() {
 #if DEBUG == DEBUG_VERBOSE
@@ -766,42 +858,6 @@ void LoraPrintParameter(struct Configuration configuration) {
 
   Serial.println("----------------------------------------");
 #endif
-}
-
-//Send Message via Lora
-void LoraSendMessage(String message) {
-  ResponseStatus rs = LoraTransmitter.sendMessage(message);
-
-  if (rs.getResponseDescription() == "Success") {
-#if DEBUG == DEBUG_VERBOSE
-    Log("Message Sended" + message);
-#endif
-  }
-  else {
-    Log(LORA_SEND_ERROR_MESSAGE + rs.getResponseDescription(), LOG_ERROR);
-  }
-}
-
-//Save Data on SD 
-void SD_SaveFlightData() {
-  String dataMessage =
-    String(current_time) + ","
-    + String(current_altitude) + ","
-    + String(current_temperature) + ","
-    + String(current_pressure) + ","
-    + String(latitude) + ","
-    + String(longitude) + ","
-    + "\n";
-  appendToFile(SD, dataFilePath.c_str(), dataMessage.c_str());
-}
-
-//Save Altitude on SD
-void SD_SaveAltitude() {
-  String dataMessage =
-    String(current_time) + ","
-    + String(current_altitude)
-    + "\n";
-  appendToFile(SD, altitudeFilePath.c_str(), dataMessage.c_str());
 }
 
 //Beep
