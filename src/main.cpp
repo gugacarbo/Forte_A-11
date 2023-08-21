@@ -8,6 +8,8 @@
 #include <CircularBuffer.h>
 #include <MPU9250.h> 
 #include <TinyGPSPlus.h>
+#include <SPIFFS.h>
+#include <ArduinoJson.h>
 
 //---- System Defines -----
 #define LOG_MESSAGE false
@@ -38,8 +40,8 @@
 #define INIT_DIR_MESSAGE              "Iniciando Diretorio"
 #define CREATING_DIR_MESSAGE          "Criando Diretorio "
 #define DIR_CREATED_MESSAGE           "Diretorio Criado" 
-#define CREATING_FILE_MESSAGE         "Criando Arquivo "
-#define FILE_CREATED_MESSAGE          "Arquivo Criado" 
+#define CREATING_FILE_MESSAGE         "Criando Arquivo: "
+#define FILE_CREATED_MESSAGE          "Arquivo Criado: " 
 #define SET_ALTTITUDE_OFFSET_MESSAGE  "Seting Altitude Offset"
 #define OFFSET_ALTITUDE_MESSAGE       "Altitude Atual:"
 
@@ -66,7 +68,7 @@
 #define ROCKET_NAME "Forte A11"
 
 //Toggle Debug Serial Logs DEBUG_ON / DEBUG_VERBOSE / (DEBUG_OFF == DEBUG_LORA)
-#define DEBUG DEBUG_VERBOSE 
+#define DEBUG DEBUG_ON //DEBUG_VERBOSE 
 
 //Flight Config
 #define ROCKET_GOAL                   500.0 //m
@@ -74,7 +76,7 @@
 #define RECOVERY_DEPLOY_MIN_ALTITUDE  400.0 //m
 #define RECOVER_AFTER_LAUNCH_MAX_TIME 11000 //ms
 
-#define RECOVERY_PIN              -1 // ? Não tem Pino Definido
+#define RECOVERY_PIN               22 // ? LED 2 Pin - Não tem Pino Definido
 
 //Battery
 #define BATTERY_MAX_VOLTAGE        7.4 //V
@@ -82,11 +84,11 @@
 #define BATTERY_SENSOR_PIN         35  //Pin
 
 //Files
-#define ROOT_DIR                "/"
-#define FOLDER_NAME             "flight_record"  //ROOT_DIR + "/" + FOLDER_NAME
-#define DATA_FILE_NAME          "sensors"        //.csv
-#define ALTITUDE_FILE_NAME      "altitude"       //.csv
-#define LOG_FILE_NAME           "log"            //.csv
+const char* ROOT_DIR = "/";
+const char* FOLDER_NAME = "/flight_record";  //ROOT_DIR + "/" + FOLDER_NAME
+const char* DATA_FILE_NAME = "/sensors";    //.csv
+const char* ALTITUDE_FILE_NAME = "/altitude";       //.csv
+const char* LOG_FILE_NAME = "/log"; //.csv
 
 //Sensors I2C (MPU, BMP280)
 #define I2C_SDA         21
@@ -105,6 +107,7 @@
 //GPS Serial2 UART
 #define GPS_RX          16 // Serial2 RX
 #define GPS_TX          17 // Serial2 TX
+#define GPS_BAUDRATE    4800 // Baudrate
 
 //Lora Config
 UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
@@ -124,7 +127,7 @@ UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
 #define LORA_UaartParity        MODE_00_8N1                   //No Parity
 
 //BUZZER
-#define BUZZER_PIN              34  //Pin
+#define BUZZER_PIN              2  //Pin //?Está no IO34 que é Input Only
 #define BUZZER_BEEP_TIME        100 //ms
 #define BUZZER_BEEP_FREQUENCY   400 //Hz
 #define BUZZER_ERROR_FREQUENCY  550 //Hz
@@ -161,6 +164,9 @@ float current_Z_acceleration;
 float current_GyroX;
 float current_GyroY;
 float current_GyroZ;
+float current_MagX;
+float current_MagY;
+float current_MagZ;
 
 //GPS
 char latitude[12];
@@ -183,6 +189,9 @@ CircularBuffer <float, 6> altitudeBuffer;
 
 LoRa_E32 LoraTransmitter(LORA_RX, LORA_TX, &Serial, LORA_AuxPin, LORA_BAUDRATE);
 
+
+// fs::FS& current_fileSystem = SD;
+fs::FS& current_fileSystem = SPIFFS;
 //Functions
 void beep(int times = 1, int beeps_interval = 0, int time = BUZZER_BEEP_TIME);
 void Log(const String& Message, bool isError = false, bool append = true);
@@ -195,7 +204,7 @@ void initAccelerometer();
 void initAltimeter();
 void initSd();
 
-void init_Dir();
+void init_Dir(fs::FS& fs);
 void createDir(fs::FS& fs, const char* path);
 bool createFile(fs::FS& fs, const char* path, const char* message);
 void appendToFile(fs::FS& fs, const char* path, const char* message);
@@ -217,6 +226,10 @@ float get_Yaw();
 float get_AccX();
 float get_AccY();
 float get_AccZ();
+float get_MagX();
+float get_MagY();
+float get_MagZ();
+
 
 void get_BatteryCharge();
 
@@ -233,9 +246,19 @@ void handle_SerialPrintData();
 void printAccelerometerCalibration();
 void LoraPrintParameter(struct Configuration configuration);
 void LoraSendMessage(String message);
+String normalizePath(String path);
 
 void setup() {
+#if DEBUG
+  Serial.begin(115200); //INICIALIZA A SERIAL
 
+  while (!SPIFFS.begin()) {
+    Serial.println("Erro ao iniciar o SPIFFS");
+    delay(1000);
+  }
+  Serial.println("Started");
+  delay(1000);
+#endif
   pinMode(RECOVERY_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BATTERY_SENSOR_PIN, INPUT);
@@ -243,17 +266,16 @@ void setup() {
   beep(5, 75);
   delay(800);
 
-#if DEBUG
-  Serial.begin(115200); //INICIALIZA A SERIAL
-#else
+#if !DEBUG
+
 //Lora
   initLora();
   delay(100);
 #endif
 
+  init_Dir(current_fileSystem);
   Log(SYSYEM_START_MESSAGE);
 
-  init_Dir();
   beep();
   delay(800);
 
@@ -278,6 +300,7 @@ void loop() {
     get_Temperature();
     get_Pressure();
     get_BatteryCharge();
+    get_Altitude();
 
     handle_SerialPrintData();
 
@@ -384,7 +407,7 @@ void init_Sensors() {
 //I2C Begin
   Wire.begin();
 
-  initSd();
+  // initSd();
   delay(100);
   initAltimeter();
   delay(100);
@@ -397,41 +420,29 @@ void init_Sensors() {
 void initSd() {
   //SD
   if (!SD.begin(5)) {
-    Log(SD_MOUNT_ERROR_MESSAGE, LOG_ERROR);
+    Log(SD_MOUNT_ERROR_MESSAGE, LOG_ERROR, false);
     Error(SD_MOUNT_ERROR);
   }
   if (SD.cardType() == CARD_NONE) {
-    Log(NO_SD_ERROR_MESSAGE, LOG_ERROR);
+    Log(NO_SD_ERROR_MESSAGE, LOG_ERROR, false);
     Error(NO_SD_ERROR);
   }
 }
 
 void initGPS() {
   //GPS
-  Serial2.begin(9600);
+  Serial2.begin(GPS_BAUDRATE);
 }
 
 void initAccelerometer() {
   //MPU
-  MPU9250Setting setting;
-  setting.accel_fs_sel = ACCEL_FS_SEL::A16G;
-  setting.gyro_fs_sel = GYRO_FS_SEL::G2000DPS;
-  setting.mag_output_bits = MAG_OUTPUT_BITS::M16BITS;
-  setting.fifo_sample_rate = FIFO_SAMPLE_RATE::SMPL_200HZ;
-  setting.gyro_fchoice = 0x03;
-  setting.gyro_dlpf_cfg = GYRO_DLPF_CFG::DLPF_41HZ;
-  setting.accel_fchoice = 0x01;
-  setting.accel_dlpf_cfg = ACCEL_DLPF_CFG::DLPF_45HZ;
 
+  if (!mpu.setup(0x68)) {  // change to your own address
 
-  if (!mpu.setup(0x68, setting)) {
     Log(MPU_ERROR_MESSAGE, LOG_ERROR);
     Error(MPU_ERROR);
   }
-  mpu.verbose(true);
-  mpu.calibrateAccelGyro();
   printAccelerometerCalibration();
-  mpu.verbose(false);
 
 }
 
@@ -477,20 +488,21 @@ void initLora() {
   LoraTransmitter.setMode(MODE_0_NORMAL);
   delay(1000);
 
-  Log(LORA_STARTED_MESSAGE);
+  Log(LORA_STARTED_MESSAGE, false, false);
 }
 
 //Get Altitude and saves on Buffer
 void get_Altitude() {
-  float alt = bmp.readAltitude(SEALEVELPRESSURE_HPA) - altitudeOffset; // colocar offset
+  float alt = bmp.readAltitude(SEALEVELPRESSURE_HPA); // colocar offset
 
   if (alt < 0) {
     Log(ALTITUDE_ERROR_MESSAGE, LOG_ERROR);
     alt = 0;
   }
+  float ofsseted_alt = alt - altitudeOffset;
 
-  altitudeBuffer.push(alt);
-  current_altitude = alt;
+  altitudeBuffer.push(ofsseted_alt);
+  current_altitude = ofsseted_alt;
 }
 
 //Get Temperature from BMP
@@ -517,6 +529,9 @@ void get_Position() {
     current_GyroX = get_GyroX();
     current_GyroY = get_GyroY();
     current_GyroZ = get_GyroZ();
+    current_MagX = get_MagX();
+    current_MagY = get_MagY();
+    current_MagZ = get_MagZ();
   }
 }
 
@@ -548,6 +563,16 @@ float get_AccY() {
 float get_AccZ() {
   return mpu.getAccZ();
 }
+float get_MagX() {
+  return mpu.getMagX();
+}
+float get_MagY() {
+  return mpu.getMagY();
+}
+float get_MagZ() {
+  return mpu.getMagZ();
+}
+
 
 //Get Location (GPS)
 void get_Coordenates() {
@@ -559,7 +584,9 @@ void get_Coordenates() {
         dtostrf(gps.location.lat(), 12, 6, latitude);
       }
       else {
+#if DEBUG== DEBUG_VERBOSE
         Log(GPS_ERROR_MESSAGE, LOG_ERROR);
+#endif
       }
     }
   }
@@ -642,7 +669,7 @@ void SD_SaveFlightData() {
     + String(apogee) + ","
     + String(current_batteryCharge)
     + "\n";
-  appendToFile(SD, dataFilePath.c_str(), dataMessage.c_str());
+  appendToFile(current_fileSystem, dataFilePath.c_str(), dataMessage.c_str());
 }
 
 //Save Altitude on SD
@@ -651,7 +678,7 @@ void SD_SaveAltitude() {
     String(current_time) + ","
     + String(current_altitude)
     + "\n";
-  appendToFile(SD, altitudeFilePath.c_str(), dataMessage.c_str());
+  appendToFile(current_fileSystem, altitudeFilePath.c_str(), dataMessage.c_str());
 }
 
 //Serial Print Data
@@ -675,10 +702,18 @@ void handle_SerialPrintData() {
   Serial.print("Pitch: ");
   Serial.println(current_pitch);
   Serial.print("Yaw: ");
-  Serial.println(current_yaw);
-#endif
+
 
 #if DEBUG == DEBUG_VERBOSE
+
+  Serial.print("MagX: ");
+  Serial.println(current_MagX);
+  Serial.print("MagY: ");
+  Serial.println(current_MagY);
+  Serial.print("MagZ: ");
+  Serial.println(current_MagZ);
+#endif
+  Serial.println(current_yaw);
   Serial.print("X Acceleration: ");
   Serial.println(current_X_acceleration);
   Serial.print("Y Acceleration: ");
@@ -695,11 +730,11 @@ void handle_SerialPrintData() {
 }
 
 //Init Files
-void init_Dir() {
+void init_Dir(fs::FS& fs) {
   // Para criar um novo directorio e arquivo toda vez que ligar a placa
   // mantendo os dados antigos e salvando separado
-  Log(INIT_DIR_MESSAGE);
-  root = SD.open(ROOT_DIR);
+  Log(INIT_DIR_MESSAGE, LOG_MESSAGE, false);
+  root = fs.open(ROOT_DIR);
   int nDir = 0;
 
   //Procura a quantidade de diretorios
@@ -717,38 +752,38 @@ void init_Dir() {
   }
 
 #if DEBUG == DEBUG_VERBOSE
-  Log("Quantidade de Diretorios Existentes: " + String(nDir));
+  Log("Quantidade de Diretorios Existentes: " + String(nDir), LOG_MESSAGE, false);
 #endif
 
   //Cria directorio para os dados
-  String Folder = String(ROOT_DIR) + String(FOLDER_NAME) + "_" + String(nDir);
-  createDir(SD, Folder.c_str());
+  String Folder = normalizePath(String(ROOT_DIR) + String(FOLDER_NAME) + "_" + String(nDir));
+  createDir(current_fileSystem, Folder.c_str());
 
   //Cria file para dados dos sensores
-  String filePath = Folder + DATA_FILE_NAME + ".csv";
-  createFile(SD, filePath.c_str(), "Tempo,Altitude,Temperatura,Pressao,latitude,longitude,Roll,Pitch,Yaw,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Apogeu,Bateria\n");
+  String filePath = normalizePath(Folder + DATA_FILE_NAME) + ".csv";
+  createFile(current_fileSystem, filePath.c_str(), "Tempo,Altitude,Temperatura,Pressao,latitude,longitude,Roll,Pitch,Yaw,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Apogeu,Bateria\n");
 
   dataFilePath = filePath;
 
   //Cria file para altitude
-  filePath = Folder + ALTITUDE_FILE_NAME + ".csv";
-  createFile(SD, filePath.c_str(), "Altitude\n");
+  filePath = normalizePath(Folder + ALTITUDE_FILE_NAME) + ".csv";
+  createFile(current_fileSystem, filePath.c_str(), "Altitude\n");
   altitudeFilePath = filePath;
 
   //Cria file para log
-  filePath = Folder + LOG_FILE_NAME + ".csv";
-  createFile(SD, filePath.c_str(), "Tempo,Tipo,Mensagem\n");
+  filePath = normalizePath(Folder + LOG_FILE_NAME) + ".csv";
+  createFile(current_fileSystem, filePath.c_str(), "Tempo,Tipo,Mensagem\n");
   logFilePath = filePath;
 }
 
 //Create Directory
 void createDir(fs::FS& fs, const char* path) {
-  Log(String(CREATING_DIR_MESSAGE) + String(path));
+  Log(String(CREATING_DIR_MESSAGE) + String(path), LOG_MESSAGE, false);
   if (fs.mkdir(path)) {
-    Log(DIR_CREATED_MESSAGE);
+    Log(DIR_CREATED_MESSAGE, LOG_MESSAGE, false);
   }
   else {
-    Log(DIR_CREATION_ERROR_MESSAGE, LOG_ERROR);
+    Log(DIR_CREATION_ERROR_MESSAGE, LOG_ERROR, false);
     Error(DIR_CREATION_ERROR);
   }
 }
@@ -756,32 +791,37 @@ void createDir(fs::FS& fs, const char* path) {
 //Create File
 bool createFile(fs::FS& fs, const char* path, const char* message) {
 
-  Log(CREATING_FILE_MESSAGE + String(path));
+  Log(CREATING_FILE_MESSAGE + String(path), LOG_MESSAGE, false);
   File file = fs.open(path, FILE_WRITE);
 
   if (!file) {
-    Log(CREATE_FILE_ERROR_MESSAGE + String(path), LOG_ERROR);
+    Log(CREATE_FILE_ERROR_MESSAGE + String(path), LOG_ERROR, false);
     Error(FILE_CREATION_ERROR);
     return false;
   }
 
   if (!file.print(message)) {
-    Log(WRITE_FILE_ERROR_MESSAGE + String(path), LOG_ERROR);
+    Log(WRITE_FILE_ERROR_MESSAGE + String(path), LOG_ERROR, false);
     Error(FILE_WRITE_ERROR);
     return false;
   }
 
   file.close();
-  Log(FILE_CREATED_MESSAGE + String(path));
+  Log(FILE_CREATED_MESSAGE + String(path), LOG_MESSAGE, false);
 
   return true;
 }
 
 //Append To a File
 void appendToFile(fs::FS& fs, const char* path, const char* message) {
+
 #if DEBUG == DEBUG_VERBOSE
   Log("Appending to file: " + String(path), LOG_MESSAGE, false);
 #endif
+
+  if (!fs.exists(path)) {
+    return;
+  }
 
   File file = fs.open(path, FILE_APPEND);
   if (!file) {
@@ -803,6 +843,8 @@ void appendToFile(fs::FS& fs, const char* path, const char* message) {
 //Print Accelerometer Calibration
 void printAccelerometerCalibration() {
 #if DEBUG == DEBUG_VERBOSE
+  mpu.verbose(true);
+
   Serial.println("< MPU Calibration Parameters >");
   Serial.println("Accel Bias [g]: ");
   Serial.print(mpu.getAccBiasX() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
@@ -832,6 +874,8 @@ void printAccelerometerCalibration() {
   Serial.print(", ");
   Serial.print(mpu.getMagScaleZ());
   Serial.println();
+
+  mpu.verbose(false);
 #endif
 }
 
@@ -877,15 +921,19 @@ void Log(const String& Message, bool isError, bool append) {
     + Message
     + "\n";
 
-  if (append) {
-    appendToFile(SD, logFilePath.c_str(), logMessage.c_str());
-  }
 
 #if DEBUG
   Serial.println(Message);
 #else
   LoraSendMessage(logMessage);
 #endif
+
+
+  if (append) {
+    appendToFile(current_fileSystem, logFilePath.c_str(), logMessage.c_str());
+  }
+
+
 
 }
 
@@ -904,4 +952,41 @@ void Error(int e) {
     delay(errorDelay * 4);
   }
 
+}
+String normalizePath(String path) {
+  String normalizedPath = "";
+  int len = path.length();
+
+  for (int i = 0; i < len; i++) {
+    char currentChar = path[i];
+
+    if (currentChar == '/') {
+      // Remove barras duplicadas
+      while (i < len - 1 && path[i + 1] == '/') {
+        i++;
+      }
+      normalizedPath += '/';
+    }
+    else if (currentChar == '.') {
+   // Resolve referências "." e ".."
+      if (i < len - 1 && path[i + 1] == '.') {
+        if (i < len - 2 && path[i + 2] == '/') {
+          // Encontrou ".." seguido por "/"
+          while (normalizedPath.length() > 1 && normalizedPath.charAt(normalizedPath.length() - 1) != '/') {
+            normalizedPath.remove(normalizedPath.length() - 1);
+          }
+          if (normalizedPath.length() > 1) {
+            normalizedPath.remove(normalizedPath.length() - 1); // Remove a última "/"
+          }
+          i += 2;
+          continue;
+        }
+      }
+    }
+    else {
+      normalizedPath += currentChar;
+    }
+  }
+
+  return normalizedPath;
 }
