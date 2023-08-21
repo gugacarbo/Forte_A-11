@@ -6,10 +6,10 @@
 #include <FS.h>
 #include <SD.h>
 #include <CircularBuffer.h>
-#include <MPU9250.h> 
+#include <MPU9250_asukiaaa.h>
 #include <TinyGPSPlus.h>
 #include <SPIFFS.h>
-#include <ArduinoJson.h>
+
 
 //---- System Defines -----
 #define LOG_MESSAGE false
@@ -18,7 +18,9 @@
 #define DEBUG_OFF false
 #define DEBUG_LORA false
 #define DEBUG_VERBOSE 2
+#define DEBUG_WIFI    3
 #define SEALEVELPRESSURE_HPA (1018.0)
+
 
 //Fatal Errors Ids
 #define BMP_ERROR           1
@@ -29,6 +31,8 @@
 #define FILE_CREATION_ERROR 6
 #define FILE_WRITE_ERROR    7
 #define FILE_OPEN_ERROR     8
+#define UNKNOW_FILE_ERROR   9
+#define FILE_HEADER_ERROR   10
 
 //Log Messages
 #define SYSYEM_START_MESSAGE          "Avionic Board Starting"
@@ -39,7 +43,6 @@
 
 #define INIT_DIR_MESSAGE              "Iniciando Diretorio"
 #define CREATING_DIR_MESSAGE          "Criando Diretorio "
-#define DIR_CREATED_MESSAGE           "Diretorio Criado" 
 #define CREATING_FILE_MESSAGE         "Criando Arquivo: "
 #define FILE_CREATED_MESSAGE          "Arquivo Criado: " 
 #define SET_ALTTITUDE_OFFSET_MESSAGE  "Seting Altitude Offset"
@@ -53,6 +56,7 @@
 #define GPS_ERROR_MESSAGE             "GPS Error, Invalid Location" 
 #define OPEN_FILE_ERROR_MESSAGE       "Failed to open file for appending"    
 #define DIR_CREATION_ERROR_MESSAGE    "Erro ao Criar Diretorio" 
+#define UNKNOW_FILE_ERROR_MESSAGE     "Erro ao Abrir Arquivo - Nao Encontrado" 
 #define CREATE_FILE_ERROR_MESSAGE     "Erro ao Criar Arquivo" 
 #define WRITE_FILE_ERROR_MESSAGE      "Erro ao Escrever no Arquivo"
 #define LORA_SEND_ERROR_MESSAGE       "Erro ao Enviar por Lora"
@@ -68,7 +72,9 @@
 #define ROCKET_NAME "Forte A11"
 
 //Toggle Debug Serial Logs DEBUG_ON / DEBUG_VERBOSE / (DEBUG_OFF == DEBUG_LORA)
-#define DEBUG DEBUG_ON //DEBUG_VERBOSE 
+#define DEBUG DEBUG_WIFI //DEBUG_VERBOSE 
+#define USE_SD false //SD / SPIFFS
+
 
 //Flight Config
 #define ROCKET_GOAL                   500.0 //m
@@ -89,6 +95,9 @@ const char* FOLDER_NAME = "/flight_record";  //ROOT_DIR + "/" + FOLDER_NAME
 const char* DATA_FILE_NAME = "/sensors";    //.csv
 const char* ALTITUDE_FILE_NAME = "/altitude";       //.csv
 const char* LOG_FILE_NAME = "/log"; //.csv
+#define DATA_FILE_HEADER "Tempo,Altitude,Temperatura,Pressao,latitude,longitude,Roll,Pitch,Yaw,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Apogeu,Bateria\n"
+#define ALTITUDE_FILE_HEADER "Tempo,Altitude\n"
+#define LOG_FILE_HEADER "Tempo,Tipo,Mensagem\n"
 
 //Sensors I2C (MPU, BMP280)
 #define I2C_SDA         21
@@ -128,6 +137,7 @@ UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
 
 //BUZZER
 #define BUZZER_PIN              2  //Pin //?Está no IO34 que é Input Only
+#define BUZZER_CHANNEL          1  //PWM CHANNEL
 #define BUZZER_BEEP_TIME        100 //ms
 #define BUZZER_BEEP_FREQUENCY   400 //Hz
 #define BUZZER_ERROR_FREQUENCY  550 //Hz
@@ -154,10 +164,12 @@ float current_altitude;
 float current_temperature;
 float current_pressure;
 
+float aX, aY, aZ, aSqrt, gX, gY, gZ, mDirection, mX, mY, mZ;
+
 //Acelerometer
-float current_roll;
-float current_yaw;
-float current_pitch;
+float current_roll = 0.0;
+float current_yaw = 0.0;
+float current_pitch = 0.0;
 float current_X_acceleration;
 float current_Y_acceleration;
 float current_Z_acceleration;
@@ -179,22 +191,25 @@ unsigned long altitudeInterval_time = 0;
 //Objects
 Adafruit_BMP280 bmp;
 TinyGPSPlus gps;
-MPU9250 mpu;
+MPU9250_asukiaaa mpu(0x68);
 
 File root;
-String logFilePath;
-String dataFilePath;
-String altitudeFilePath;
+String logFilePath = "";
+String dataFilePath = "";
+String altitudeFilePath = "";
 CircularBuffer <float, 6> altitudeBuffer;
 
 LoRa_E32 LoraTransmitter(LORA_RX, LORA_TX, &Serial, LORA_AuxPin, LORA_BAUDRATE);
 
-
+#if USE_SD
 // fs::FS& current_fileSystem = SD;
+#else
 fs::FS& current_fileSystem = SPIFFS;
+#endif
+
 //Functions
 void beep(int times = 1, int beeps_interval = 0, int time = BUZZER_BEEP_TIME);
-void Log(const String& Message, bool isError = false, bool append = true);
+void Log(const String& Message, bool isError = false, bool appendToLogFile = true);
 void Error(int e);
 
 void init_Sensors();
@@ -204,32 +219,21 @@ void initAccelerometer();
 void initAltimeter();
 void initSd();
 
+String normalizePath(String path);
+int countFieldsInCSV(String csvLine);
+
 void init_Dir(fs::FS& fs);
 void createDir(fs::FS& fs, const char* path);
 bool createFile(fs::FS& fs, const char* path, const char* message);
-void appendToFile(fs::FS& fs, const char* path, const char* message);
-void SD_SaveFlightData();
-void SD_SaveAltitude();
+void appendToFile(fs::FS& fs, const char* path, const char* message, String fileHeader);
+void File_SaveFlightData();
+void File_SaveAltitude();
 
 void get_Pressure();
 void get_Altitude();
 void get_Temperature();
 void get_Coordenates();
 void get_Position();
-
-float get_GyroX();
-float get_GyroY();
-float get_GyroZ();
-float get_Roll();
-float get_Pitch();
-float get_Yaw();
-float get_AccX();
-float get_AccY();
-float get_AccZ();
-float get_MagX();
-float get_MagY();
-float get_MagZ();
-
 
 void get_BatteryCharge();
 
@@ -243,49 +247,94 @@ bool isFalling();
 void activateRecovery();
 
 void handle_SerialPrintData();
-void printAccelerometerCalibration();
 void LoraPrintParameter(struct Configuration configuration);
 void LoraSendMessage(String message);
-String normalizePath(String path);
+
+
+
+#if DEBUG == DEBUG_WIFI
+// ! WIFI DEBUGGER
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncWebSocket.h>
+#include <ArduinoJson.h>
+
+#define WIFI_START_MESSAGE "WiFi Started"
+#define JSON_SIZE 2048
+const char* ssid = "Catthoobias";
+const char* password = "elementanimais";
+
+void onWiFiDisconnect(WiFiEvent_t event);
+void WebSocketHandler(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len);
+void generateHTTPResponse(AsyncWebServerRequest* request, StaticJsonDocument<JSON_SIZE> data, int status = 200);
+void setHandlers();
+void sendDataWs();
+
+
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+AsyncWebSocketClient* client = NULL;
+
+DynamicJsonDocument sensors(4096);
+
+void setHandlers();
+void init_Wifi();
+void onWiFiDisconnect(WiFiEvent_t event);
+
+#endif
 
 void setup() {
 #if DEBUG
   Serial.begin(115200); //INICIALIZA A SERIAL
-
-  while (!SPIFFS.begin()) {
-    Serial.println("Erro ao iniciar o SPIFFS");
-    delay(1000);
-  }
   Serial.println("Started");
-  delay(1000);
+  delay(250);
 #endif
-  pinMode(RECOVERY_PIN, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(BATTERY_SENSOR_PIN, INPUT);
 
-  beep(5, 75);
-  delay(800);
+#if USE_SD
+  initSd();
+  delay(400);
+#else
+  while (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS Mount Failed");
+    delay(250);
+  }
+#endif
 
-#if !DEBUG
+#if DEBUG == DEBUG_WIFI
+  init_Wifi();
+#endif
 
-//Lora
+#if DEBUG == DEBUG_LORA //Serial Off
   initLora();
   delay(100);
 #endif
+
+
+  pinMode(RECOVERY_PIN, OUTPUT);
+  pinMode(BATTERY_SENSOR_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  beep(5, 75);
+  delay(200);
+
+
+
 
   init_Dir(current_fileSystem);
   Log(SYSYEM_START_MESSAGE);
 
   beep();
-  delay(800);
+  delay(200);
 
   init_Sensors();
   beep();
-  delay(500);
+  delay(200);
 
   set_AltitudeOffset();
   beep(3, 100);
-  delay(1000);
+  delay(200);
 
   Log(SETUP_END_MESSAGE);
 }
@@ -304,8 +353,8 @@ void loop() {
 
     handle_SerialPrintData();
 
-    if (flightStarted) {
-      SD_SaveFlightData();
+    if (flightStarted || DEBUG) {
+      File_SaveFlightData();
     }
 
     dataInterval_time = millis();
@@ -314,7 +363,7 @@ void loop() {
   //Altitude Interval
   if (flightStarted && millis() - altitudeInterval_time >= ALTITUDE_INTERVAL_DELAY) {
     get_Altitude();
-    SD_SaveAltitude();
+    File_SaveAltitude();
 
     altitudeInterval_time = millis();
   }
@@ -407,14 +456,12 @@ void init_Sensors() {
 //I2C Begin
   Wire.begin();
 
-  // initSd();
-  delay(100);
-  initAltimeter();
-  delay(100);
-  initGPS();
-  delay(100);
+  delay(2000);
   initAccelerometer();
-  delay(100);
+  delay(500);
+  initGPS();
+  delay(500);
+  initAltimeter();
 }
 
 void initSd() {
@@ -436,13 +483,16 @@ void initGPS() {
 
 void initAccelerometer() {
   //MPU
+  mpu.setWire(&Wire);
+  uint8_t sensorId;
 
-  if (!mpu.setup(0x68)) {  // change to your own address
-
+  if (mpu.readId(&sensorId) != 0) {
     Log(MPU_ERROR_MESSAGE, LOG_ERROR);
     Error(MPU_ERROR);
   }
-  printAccelerometerCalibration();
+  mpu.beginAccel();
+  mpu.beginGyro();
+  mpu.beginMag();
 
 }
 
@@ -518,67 +568,68 @@ void get_Pressure() {
 
 //Get Positon (Accelerometer)
 void get_Position() {
-  if (mpu.update())
-  {
-    current_roll = get_Roll();
-    current_pitch = get_Pitch();
-    current_yaw = get_Yaw();
-    current_X_acceleration = get_AccX();
-    current_Y_acceleration = get_AccY();
-    current_Z_acceleration = get_AccZ();
-    current_GyroX = get_GyroX();
-    current_GyroY = get_GyroY();
-    current_GyroZ = get_GyroZ();
-    current_MagX = get_MagX();
-    current_MagY = get_MagY();
-    current_MagZ = get_MagZ();
+  uint8_t sensorId;
+  int result;
+
+  result = mpu.readId(&sensorId);
+  if (result == 0) {
+      //Serial.println("sensorId:" + String(sensorId));
   }
+  else {
+    Log("Cannot read sensorId " + String(result), LOG_ERROR);
+  }
+
+  result = mpu.accelUpdate();
+  if (result == 0) {
+    current_X_acceleration = mpu.accelX();
+    current_Y_acceleration = mpu.accelY();
+    current_Z_acceleration = mpu.accelZ();
+    aSqrt = mpu.accelSqrt();
+  }
+  result = mpu.gyroUpdate();
+  if (result == 0) {
+    gX = mpu.gyroX();
+    gY = mpu.gyroY();
+    gZ = mpu.gyroZ();
+  }
+
+  result = mpu.magUpdate();
+  if (result != 0) {
+    Serial.println("cannot read mag so call begin again");
+    mpu.beginMag();
+    result = mpu.magUpdate();
+  }
+  if (result == 0) {
+    current_MagX = mpu.magX();
+    current_MagY = mpu.magY();
+    current_MagZ = mpu.magZ();
+    mDirection = mpu.magHorizDirection();
+  }
+
+  float pitch = 180 * atan(current_X_acceleration / sqrt(current_Y_acceleration * current_Y_acceleration + current_Z_acceleration * current_Z_acceleration)) / M_PI;
+  float roll = 180 * atan(current_Y_acceleration / sqrt(current_X_acceleration * current_X_acceleration + current_Z_acceleration * current_Z_acceleration)) / M_PI;
+  float yaw = 180 * atan(current_Z_acceleration / sqrt(current_X_acceleration * current_X_acceleration + current_Z_acceleration * current_Z_acceleration)) / M_PI;
+  current_roll = roll;
+  // current_pitch = pitch;
+  // current_yaw = yaw;
+  current_pitch = yaw;
+  current_yaw =  pitch;
+
 }
 
-//Accelerometer
-float get_GyroX() {
-  return mpu.getGyroX();
-}
-float get_GyroY() {
-  return mpu.getGyroY();
-}
-float get_GyroZ() {
-  return mpu.getGyroZ();
-}
-float get_Roll() {
-  return mpu.getRoll();
-}
-float get_Pitch() {
-  return mpu.getPitch();
-}
-float get_Yaw() {
-  return mpu.getYaw();
-}
-float get_AccX() {
-  return mpu.getAccX();
-}
-float get_AccY() {
-  return mpu.getAccY();
-}
-float get_AccZ() {
-  return mpu.getAccZ();
-}
-float get_MagX() {
-  return mpu.getMagX();
-}
-float get_MagY() {
-  return mpu.getMagY();
-}
-float get_MagZ() {
-  return mpu.getMagZ();
-}
+//A
 
 
 //Get Location (GPS)
 void get_Coordenates() {
+
+  if (millis() > 5000 && gps.charsProcessed() < 10)
+  {
+    Log("No GPS detected: check wiring.", LOG_ERROR);
+  }
+
   while (Serial2.available() > 0) {
     if (gps.encode(Serial2.read())) {
-      gps.encode(Serial2.read());
       if (gps.location.isValid()) {
         dtostrf(gps.location.lng(), 12, 6, longitude);
         dtostrf(gps.location.lat(), 12, 6, latitude);
@@ -595,8 +646,12 @@ void get_Coordenates() {
 // BATTERY_MIN_VOLTAGE = 0%
 // BATTERY_MAX_VOLTAGE = 100%
 void get_BatteryCharge() {
+  int R1 = 15000;
+  int R2 = 10000;
   float reading = analogRead(BATTERY_SENSOR_PIN);
-  float voltage = (reading * BATTERY_MAX_VOLTAGE) / 1023.0;
+  float Max_Reading = R2 / (R1 + R2) * BATTERY_MAX_VOLTAGE;
+
+  float voltage = (reading * BATTERY_MAX_VOLTAGE) / (1023.0 * (3.3 - Max_Reading));
   float percent = (voltage - BATTERY_MIN_VOLTAGE) / (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE) * 100;
   current_batteryCharge = percent;
 }
@@ -648,7 +703,7 @@ void LoraSendMessage(String message) {
 }
 
 //Save Data on SD 
-void SD_SaveFlightData() {
+void File_SaveFlightData() {
 
   String dataMessage =
     String(current_time) + ","
@@ -669,16 +724,16 @@ void SD_SaveFlightData() {
     + String(apogee) + ","
     + String(current_batteryCharge)
     + "\n";
-  appendToFile(current_fileSystem, dataFilePath.c_str(), dataMessage.c_str());
+  appendToFile(current_fileSystem, dataFilePath.c_str(), dataMessage.c_str(), DATA_FILE_HEADER);
 }
 
 //Save Altitude on SD
-void SD_SaveAltitude() {
+void File_SaveAltitude() {
   String dataMessage =
     String(current_time) + ","
     + String(current_altitude)
     + "\n";
-  appendToFile(current_fileSystem, altitudeFilePath.c_str(), dataMessage.c_str());
+  appendToFile(current_fileSystem, altitudeFilePath.c_str(), dataMessage.c_str(), ALTITUDE_FILE_HEADER);
 }
 
 //Serial Print Data
@@ -686,46 +741,65 @@ void handle_SerialPrintData() {
 #if DEBUG
   //BPM
   Serial.print("Temperatura:");
-  Serial.println(current_temperature);
+  Serial.print(current_temperature);
+  Serial.print(",");
   Serial.print("Pressao: ");
-  Serial.println(current_pressure);
+  Serial.print(current_pressure);
+  Serial.print(",");
   Serial.print("Altitude: ");
-  Serial.println(current_altitude);
-
-  Serial.print("Latitude: ");
-  Serial.println(latitude);
-  Serial.print("Longitude: ");
-  Serial.println(longitude);
+  Serial.print(current_altitude);
+  Serial.print(",");
 
   Serial.print("Roll: ");
-  Serial.println(current_roll);
+  Serial.print(current_roll);
+  Serial.print(",");
   Serial.print("Pitch: ");
-  Serial.println(current_pitch);
+  Serial.print(current_pitch);
+  Serial.print(",");
   Serial.print("Yaw: ");
+  Serial.print(current_yaw);
+  Serial.print(",");
 
+  Serial.print("Latitude: ");
+  Serial.print(latitude);
+  Serial.print(",");
+  Serial.print("Longitude: ");
+  Serial.print(longitude);
+  Serial.print(",");
 
 #if DEBUG == DEBUG_VERBOSE
-
   Serial.print("MagX: ");
-  Serial.println(current_MagX);
+  Serial.print(current_MagX);
+  Serial.print(",");
   Serial.print("MagY: ");
-  Serial.println(current_MagY);
+  Serial.print(current_MagY);
+  Serial.print(",");
   Serial.print("MagZ: ");
-  Serial.println(current_MagZ);
-#endif
-  Serial.println(current_yaw);
+  Serial.print(current_MagZ);
+  Serial.print(",");
   Serial.print("X Acceleration: ");
-  Serial.println(current_X_acceleration);
+  Serial.print(current_X_acceleration);
+  Serial.print(",");
   Serial.print("Y Acceleration: ");
-  Serial.println(current_Y_acceleration);
+  Serial.print(current_Y_acceleration);
+  Serial.print(",");
   Serial.print("Z Acceleration: ");
-  Serial.println(current_Z_acceleration);
+  Serial.print(current_Z_acceleration);
+  Serial.print(",");
   Serial.print("Gyro X: ");
-  Serial.println(current_GyroX);
+  Serial.print(current_GyroX);
+  Serial.print(",");
   Serial.print("Gyro Y: ");
-  Serial.println(current_GyroY);
+  Serial.print(current_GyroY);
+  Serial.print(",");
   Serial.print("Gyro Z: ");
-  Serial.println(current_GyroZ);
+  Serial.print(current_GyroZ);
+#endif
+  Serial.print("\n");
+
+#if DEBUG == DEBUG_WIFI
+  sendDataWs();
+#endif
 #endif
 }
 
@@ -761,28 +835,25 @@ void init_Dir(fs::FS& fs) {
 
   //Cria file para dados dos sensores
   String filePath = normalizePath(Folder + DATA_FILE_NAME) + ".csv";
-  createFile(current_fileSystem, filePath.c_str(), "Tempo,Altitude,Temperatura,Pressao,latitude,longitude,Roll,Pitch,Yaw,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Apogeu,Bateria\n");
+  createFile(current_fileSystem, filePath.c_str(), DATA_FILE_HEADER);
 
   dataFilePath = filePath;
 
   //Cria file para altitude
   filePath = normalizePath(Folder + ALTITUDE_FILE_NAME) + ".csv";
-  createFile(current_fileSystem, filePath.c_str(), "Altitude\n");
+  createFile(current_fileSystem, filePath.c_str(), ALTITUDE_FILE_HEADER);
   altitudeFilePath = filePath;
 
   //Cria file para log
   filePath = normalizePath(Folder + LOG_FILE_NAME) + ".csv";
-  createFile(current_fileSystem, filePath.c_str(), "Tempo,Tipo,Mensagem\n");
+  createFile(current_fileSystem, filePath.c_str(), LOG_FILE_HEADER);
   logFilePath = filePath;
 }
 
 //Create Directory
 void createDir(fs::FS& fs, const char* path) {
   Log(String(CREATING_DIR_MESSAGE) + String(path), LOG_MESSAGE, false);
-  if (fs.mkdir(path)) {
-    Log(DIR_CREATED_MESSAGE, LOG_MESSAGE, false);
-  }
-  else {
+  if (!fs.mkdir(path)) {
     Log(DIR_CREATION_ERROR_MESSAGE, LOG_ERROR, false);
     Error(DIR_CREATION_ERROR);
   }
@@ -813,14 +884,11 @@ bool createFile(fs::FS& fs, const char* path, const char* message) {
 }
 
 //Append To a File
-void appendToFile(fs::FS& fs, const char* path, const char* message) {
-
-#if DEBUG == DEBUG_VERBOSE
-  Log("Appending to file: " + String(path), LOG_MESSAGE, false);
-#endif
+void appendToFile(fs::FS& fs, const char* path, const char* message, String fileHeader) {
 
   if (!fs.exists(path)) {
-    return;
+    Log(UNKNOW_FILE_ERROR_MESSAGE + String(path), LOG_ERROR);
+    Error(UNKNOW_FILE_ERROR);
   }
 
   File file = fs.open(path, FILE_APPEND);
@@ -829,54 +897,21 @@ void appendToFile(fs::FS& fs, const char* path, const char* message) {
     Error(FILE_OPEN_ERROR);
     return;
   }
+  if (countFieldsInCSV(fileHeader) != countFieldsInCSV(message)) {
+    Log("Invalid number of fields", LOG_ERROR);
+    Error(FILE_HEADER_ERROR);
+    return;
+  }
+
   if (!file.print(message)) {
     Log(WRITE_FILE_ERROR_MESSAGE);
     Error(FILE_WRITE_ERROR);
   }
 
 #if DEBUG == DEBUG_VERBOSE
-  Log("Message Appended", LOG_MESSAGE, false);
+  Log("Message Appended to file:" + String(path), LOG_MESSAGE, false);
 #endif
   file.close();
-}
-
-//Print Accelerometer Calibration
-void printAccelerometerCalibration() {
-#if DEBUG == DEBUG_VERBOSE
-  mpu.verbose(true);
-
-  Serial.println("< MPU Calibration Parameters >");
-  Serial.println("Accel Bias [g]: ");
-  Serial.print(mpu.getAccBiasX() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getAccBiasY() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getAccBiasZ() * 1000.f / (float)MPU9250::CALIB_ACCEL_SENSITIVITY);
-  Serial.println();
-  Serial.println("Gyro Bias [deg/s]: ");
-  Serial.print(mpu.getGyroBiasX() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getGyroBiasY() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
-  Serial.print(", ");
-  Serial.print(mpu.getGyroBiasZ() / (float)MPU9250::CALIB_GYRO_SENSITIVITY);
-  Serial.println();
-  Serial.println("Mag Bias [mG]: ");
-  Serial.print(mpu.getMagBiasX());
-  Serial.print(", ");
-  Serial.print(mpu.getMagBiasY());
-  Serial.print(", ");
-  Serial.print(mpu.getMagBiasZ());
-  Serial.println();
-  Serial.println("Mag scale []: ");
-  Serial.print(mpu.getMagScaleX());
-  Serial.print(", ");
-  Serial.print(mpu.getMagScaleY());
-  Serial.print(", ");
-  Serial.print(mpu.getMagScaleZ());
-  Serial.println();
-
-  mpu.verbose(false);
-#endif
 }
 
 //Print Lora Configuration
@@ -908,13 +943,20 @@ void LoraPrintParameter(struct Configuration configuration) {
 void beep(int times, int beeps_interval, int time) {
   for (size_t i = 0; i < times; i++)
   {
-    tone(BUZZER_PIN, BUZZER_BEEP_FREQUENCY, time);
-    delay(beeps_interval + time);
+    //tone(BUZZER_PIN, BUZZER_BEEP_FREQUENCY, time);
+    ledcSetup(BUZZER_CHANNEL, BUZZER_BEEP_FREQUENCY, 8);
+    ledcAttachPin(BUZZER_PIN, BUZZER_CHANNEL);
+
+    ledcWriteTone(BUZZER_CHANNEL, BUZZER_BEEP_FREQUENCY);
+
+    delay(time);
+    ledcDetachPin(BUZZER_PIN); // Desanexa o pino do PWM
+    delay(beeps_interval);
   }
 }
 
 //Log and Save
-void Log(const String& Message, bool isError, bool append) {
+void Log(const String& Message, bool isError, bool appendToLogFile) {
   String logMessage =
     String(millis()) + ","
     + (isError ? "Error" : "Info") + ","
@@ -927,14 +969,9 @@ void Log(const String& Message, bool isError, bool append) {
 #else
   LoraSendMessage(logMessage);
 #endif
-
-
-  if (append) {
-    appendToFile(current_fileSystem, logFilePath.c_str(), logMessage.c_str());
+  if (appendToLogFile) {
+    appendToFile(current_fileSystem, logFilePath.c_str(), logMessage.c_str(), LOG_FILE_HEADER);
   }
-
-
-
 }
 
 //Fatal Error, Halt
@@ -942,6 +979,7 @@ void Error(int e) {
   int errorDelay = 800;
 
   while (true) {
+    Log("Fatal Error id " + String(e), LOG_ERROR);
     tone(BUZZER_PIN, BUZZER_ERROR_FREQUENCY, errorDelay * 2);
     delay(errorDelay * 4);
 
@@ -953,6 +991,7 @@ void Error(int e) {
   }
 
 }
+
 String normalizePath(String path) {
   String normalizedPath = "";
   int len = path.length();
@@ -990,3 +1029,197 @@ String normalizePath(String path) {
 
   return normalizedPath;
 }
+
+int countFieldsInCSV(String csvLine) {
+  int count = 1;  // Começamos com 1 porque há pelo menos um campo
+
+  for (char c : csvLine) {
+    if (c == ',') {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+#if DEBUG == DEBUG_WIFI
+void init_Wifi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.waitForConnectResult() != WL_CONNECTED)
+  {
+    Log("WiFi Failed!", LOG_ERROR, false);
+    delay(1000);
+  }
+
+  WiFi.onEvent(onWiFiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
+  setHandlers();
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  server.begin();
+
+  Log(WIFI_START_MESSAGE, true, false);
+  Log("IP Address: " + (WiFi.localIP().toString()), LOG_MESSAGE, false);
+}
+
+void onWiFiDisconnect(WiFiEvent_t event)
+{
+  Log("Conexão WiFi perdida!", LOG_ERROR, false);
+  WiFi.begin(ssid, password);
+
+  if (WiFi.waitForConnectResult() != WL_CONNECTED)
+  {
+    Serial.printf("WiFi Failed!\n");
+    return;
+  }
+
+
+}
+
+void generateHTTPResponse(AsyncWebServerRequest* request, StaticJsonDocument<JSON_SIZE> data, int status)
+{
+  data["status"] = status;
+  String jsonString;
+  serializeJson(data, jsonString);
+  request->send(status, "application/json", jsonString);
+}
+
+void setHandlers()
+{
+
+  server.on("/index.html", HTTP_ANY, [](AsyncWebServerRequest* request)
+    { request->send(SPIFFS, "/index.html"); });
+  server.on("/", HTTP_ANY, [](AsyncWebServerRequest* request)
+    { request->send(SPIFFS, "/index.html"); });
+
+  server.on("/index.js", HTTP_ANY, [](AsyncWebServerRequest* request)
+    { request->send(SPIFFS, "/index.js"); });
+
+  server.on("/main.css", HTTP_ANY, [](AsyncWebServerRequest* request)
+    { request->send(SPIFFS, "/main.css"); });
+
+
+  server.serveStatic("/", SPIFFS, "/");
+
+
+  server.onNotFound(
+    [](AsyncWebServerRequest* request)
+    {
+      StaticJsonDocument<JSON_SIZE> data;
+      data["message"] = "Not Found";
+      generateHTTPResponse(request, data, 404);
+    });
+
+  ws.onEvent(WebSocketHandler);
+  server.addHandler(&ws);
+}
+
+void WebSocketHandler(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len) {
+  if (type == WS_EVT_DATA)
+  {
+#if DEBUG == DEBUG_VERBOSE
+    Serial.printf("Received Ws_[#%u] >> %s\n", client->id(), (char*)data);
+#endif
+    StaticJsonDocument<JSON_SIZE> json_data;
+    DeserializationError err = deserializeJson(json_data, (char*)data);
+    if (err)
+    {
+      json_data.clear();
+      json_data["status"] = 400;
+      json_data["message"] = "Bad Request";
+      String jsonString;
+      serializeJson(json_data, jsonString);
+      client->text(jsonString);
+    }
+
+    String jsonString;
+    serializeJson(json_data, jsonString);
+    client->text(jsonString);
+    json_data.clear();
+  }
+  else if (type == WS_EVT_CONNECT)
+  {
+    StaticJsonDocument<JSON_SIZE> json_data;
+#if DEBUG == DEBUG_VERBOSE
+    Serial.printf("Websocket client #%u connected\n", client->id());
+#endif
+
+    String jsonString;
+    json_data["status"] = "Ready";
+    // json_data["message"] = "Hello Client (id) " + String(client->id());
+    serializeJson(json_data, jsonString);
+    client->text(jsonString);
+  }
+  else if (type == WS_EVT_DISCONNECT)
+  {
+#if DEBUG == DEBUG_VERBOSE
+    Serial.printf("Websocket client #%u disconnected\n", client->id());
+#endif
+  }
+  else if (type == WS_EVT_ERROR)
+  {
+#if DEBUG == DEBUG_VERBOSE
+    Serial.printf("ws[%s][%u] error(%u): %s\n", server->url(), client->id(), *((uint16_t*)arg), (char*)data);
+#endif
+  }
+  else if (type == WS_EVT_PONG)
+  {
+#if DEBUG == DEBUG_VERBOSE
+    Serial.printf("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len) ? (char*)data : "");
+#endif
+  }
+}
+
+void sendDataWs()
+{
+  ws.cleanupClients();
+  for (auto client : ws.getClients())
+  {
+    if (client->status() != WS_CONNECTED)
+    {
+      //Serial.println("Client has disconnected.");
+      //Serial.println("Removing.");
+      client->close();
+    }
+  }
+  String buffer;
+  StaticJsonDocument<JSON_SIZE> sensorsJson;
+
+  sensorsJson["sensors"]["alt"]["name"] = "Altitude";
+  sensorsJson["sensors"]["alt"]["value"] = current_altitude;
+  sensorsJson["sensors"]["alt"]["unity"] = "m";
+
+  sensorsJson["sensors"]["temp"]["name"] = "Temperature";
+  sensorsJson["sensors"]["temp"]["value"] = current_temperature;
+  sensorsJson["sensors"]["temp"]["unity"] = "°C";
+
+  sensorsJson["sensors"]["pressure"]["name"] = "Pressure";
+  sensorsJson["sensors"]["pressure"]["value"] = current_pressure;
+  sensorsJson["sensors"]["pressure"]["unity"] = "hPa";
+
+  sensorsJson["sensors"]["roll"]["name"] = "Roll";
+  sensorsJson["sensors"]["roll"]["value"] = current_roll;
+  sensorsJson["sensors"]["roll"]["unity"] = "°";
+
+  sensorsJson["sensors"]["pitch"]["name"] = "Pitch";
+  sensorsJson["sensors"]["pitch"]["value"] = current_pitch;
+  sensorsJson["sensors"]["pitch"]["unity"] = "°";
+
+  sensorsJson["sensors"]["yaw"]["name"] = "Yaw";
+  sensorsJson["sensors"]["yaw"]["value"] = current_yaw;
+  sensorsJson["sensors"]["yaw"]["unity"] = "°";
+
+  sensorsJson["sensors"]["latitude"]["name"] = "Latitude";
+  sensorsJson["sensors"]["latitude"]["value"] = latitude;
+  sensorsJson["sensors"]["latitude"]["unity"] = "";
+
+  sensorsJson["sensors"]["longitude"]["name"] = "Longitude";
+  sensorsJson["sensors"]["longitude"]["value"] = longitude;
+  sensorsJson["sensors"]["longitude"]["unity"] = "";
+
+  serializeJson(sensorsJson, buffer);
+  ws.textAll(buffer);
+}
+
+#endif
