@@ -20,7 +20,7 @@
 #define DEBUG_LORA false
 #define DEBUG_VERBOSE 2
 #define DEBUG_WIFI    3
-#define SEALEVELPRESSURE_HPA (1018.0)
+#define SEALEVELPRESSURE_HPA (1018.0) 
 
 
 //Fatal Errors Ids
@@ -189,7 +189,7 @@ float current_pitch = 0.0;
 float current_X_acceleration;
 float current_Y_acceleration;
 float current_Z_acceleration;
-float current_square_acceleration;
+float current_sqrt_acceleration;
 
 float current_X_gyro;
 float current_Y_gyro;
@@ -319,6 +319,15 @@ void setup() {
 	delay(250);
 #endif
 
+#if DEBUG == DEBUG_LORA //Serial Off
+	initLora();
+	delay(100);
+#endif
+
+#if DEBUG == DEBUG_WIFI
+	init_Wifi();
+#endif
+
 #if USE_SD
 	initSd();
 	delay(400);
@@ -329,14 +338,7 @@ void setup() {
 	}
 #endif
 
-#if DEBUG == DEBUG_LORA //Serial Off
-	initLora();
-	delay(100);
-#endif
 
-#if DEBUG == DEBUG_WIFI
-	init_Wifi();
-#endif
 
 	beep(5, 75);
 	delay(200);
@@ -625,7 +627,7 @@ void get_Position() {
 		current_X_acceleration = mpu.accelX();
 		current_Y_acceleration = mpu.accelY();
 		current_Z_acceleration = mpu.accelZ();
-		current_square_acceleration = mpu.accelSqrt();
+		current_sqrt_acceleration = mpu.accelSqrt();
 	}
 	result = mpu.gyroUpdate();
 	if (result == 0) {
@@ -735,56 +737,71 @@ void SendJsonData() {
 	data["sensors"]["altitude"]["name"] = "Altitude";
 	data["sensors"]["altitude"]["value"] = current_altitude;
 	data["sensors"]["altitude"]["unity"] = "m";
-
-	data["sensors"]["temperature"]["name"] = "Temperature";
-	data["sensors"]["temperature"]["value"] = current_temperature;
-	data["sensors"]["temperature"]["unity"] = "°C";
-
-	data["sensors"]["pressure"]["name"] = "Pressure";
-	data["sensors"]["pressure"]["value"] = current_pressure;
-	data["sensors"]["pressure"]["unity"] = "hPa";
-
-	data["sensors"]["latitude"]["name"] = "Latitude";
-	data["sensors"]["latitude"]["value"] = latitude;
-	data["sensors"]["latitude"]["unity"] = "°";
-
-	data["sensors"]["longitude"]["name"] = "Longitude";
-	data["sensors"]["longitude"]["value"] = longitude;
-	data["sensors"]["longitude"]["unity"] = "°";
-
-	data["sensors"]["roll"]["name"] = "Roll";
-	data["sensors"]["roll"]["value"] = current_roll;
-	data["sensors"]["roll"]["unity"] = "°";
-
-	data["sensors"]["pitch"]["name"] = "Pitch";
-	data["sensors"]["pitch"]["value"] = current_pitch;
-	data["sensors"]["pitch"]["unity"] = "°";
-
-	data["sensors"]["yaw"]["name"] = "Yaw";
-	data["sensors"]["yaw"]["value"] = current_yaw;
-	data["sensors"]["yaw"]["unity"] = "°";
-
-	if (current_square_acceleration != 0) {
-		data["sensors"]["acceleration"]["name"] = "Acceleration";
-		data["sensors"]["acceleration"]["value"] = current_square_acceleration;
-		data["sensors"]["acceleration"]["unity"] = "m/s";
-	}
-
+	data["sensors"]["altitude"]["order"] = "1";
 
 	data["sensors"]["vertical_velocity"]["name"] = "Vertical Velocity";
 	data["sensors"]["vertical_velocity"]["value"] = calcVelocity();
 	data["sensors"]["vertical_velocity"]["unity"] = "m/s";
+	data["sensors"]["altitude"]["order"] = "2";
 
-	data["sensors"]["time"]["name"] = "Flight Time";
-	data["sensors"]["time"]["value"] = round(current_time / 1000.0);
-	data["sensors"]["time"]["unity"] = "s";
+	data["sensors"]["temperature"]["name"] = "Temperature";
+	data["sensors"]["temperature"]["value"] = current_temperature;
+	data["sensors"]["temperature"]["unity"] = "°C";
+	data["sensors"]["altitude"]["order"] = "3";
+
+	data["sensors"]["pressure"]["name"] = "Pressure";
+	data["sensors"]["pressure"]["value"] = current_pressure;
+	data["sensors"]["pressure"]["unity"] = "hPa";
+	data["sensors"]["pressure"]["order"] = "4";
+
+	if (String(latitude).toInt()) {
+
+		data["sensors"]["latitude"]["name"] = "Latitude";
+		data["sensors"]["latitude"]["value"] = latitude;
+		data["sensors"]["latitude"]["unity"] = "°";
+
+		data["sensors"]["longitude"]["name"] = "Longitude";
+		data["sensors"]["longitude"]["value"] = longitude;
+		data["sensors"]["longitude"]["unity"] = "°";
+
+	}
+	data["sensors"]["roll"]["name"] = "Roll";
+	data["sensors"]["roll"]["value"] = current_roll;
+	data["sensors"]["roll"]["unity"] = "°";
+	data["sensors"]["roll"]["order"] = "5";
+
+	data["sensors"]["pitch"]["name"] = "Pitch";
+	data["sensors"]["pitch"]["value"] = current_pitch;
+	data["sensors"]["pitch"]["unity"] = "°";
+	data["sensors"]["pitch"]["order"] = "5";
+
+	data["sensors"]["yaw"]["name"] = "Yaw";
+	data["sensors"]["yaw"]["value"] = current_yaw;
+	data["sensors"]["yaw"]["unity"] = "°";
+	data["sensors"]["yaw"]["order"] = "5";
+
+	if (current_sqrt_acceleration != 0) {
+		data["sensors"]["sqrt_acceleration"]["name"] = "Sqrt Acceleration";
+		data["sensors"]["sqrt_acceleration"]["value"] = current_sqrt_acceleration;
+		data["sensors"]["sqrt_acceleration"]["unity"] = "m/s";
+	}
 
 
-	data["apoggee"] = apogee;
+	if (flightStarted) {
+		data["sensors"]["time"]["name"] = "Flight Time";
+		data["sensors"]["time"]["value"] = round(current_time / 1000.0);
+		data["sensors"]["time"]["unity"] = "s";
+		data["sensors"]["time"]["order"] = "1";
+	}
 
-	data["battery"] = "Battery";
+	data["offset_altitude"] = altitudeOffset;
+	data["sea_level_pressure"] = SEALEVELPRESSURE_HPA;
+
+	if (flightStarted) {
+		data["apoggee"] = apogee;
+	}
+
 	data["battery"] = current_batteryCharge;
-	data["battery"] = "%";
 
 	if (!flightStarted) {
 		data["status"] = "Ready";
@@ -827,7 +844,7 @@ void File_SaveFlightData() {
 		+ String(current_X_acceleration) + ","
 		+ String(current_Y_acceleration) + ","
 		+ String(current_Z_acceleration) + ","
-		+ String(current_square_acceleration) + ","
+		+ String(current_sqrt_acceleration) + ","
 		+ String(current_X_gyro) + ","
 		+ String(current_Y_gyro) + ","
 		+ String(current_Z_gyro) + ","
@@ -1082,6 +1099,15 @@ void Log(const String& Message, bool isError, bool appendToLogFile) {
 	LoraSendMessage(buffer);
 #endif
 
+#if DEBUG == DEBUG_WIFI
+	StaticJsonDocument<512> jsonMessage;
+	String buffer;
+	jsonMessage["log"]["message"] = Message;
+	jsonMessage["log"]["type"] = (isError ? "Error" : "Info");
+	serializeJson(jsonMessage, buffer);
+	sendDataWs(buffer);
+#endif
+
 	if (appendToLogFile) {
 		appendToFile(current_fileSystem, logFilePath.c_str(), logMessage.c_str(), LOG_FILE_HEADER);
 	}
@@ -1102,8 +1128,8 @@ void Error(int e) {
 		}
 		delay(errorDelay * 4);
 		StaticJsonDocument<512> jsonError;
-		jsonError["error"]["error_id"] = e;
-		jsonError["error"]["error_message"] = ERROR_MESSAGES[e];
+		jsonError["error"]["id"] = e;
+		jsonError["error"]["message"] = ERROR_MESSAGES[e];
 		String buffer;
 		serializeJson(jsonError, buffer);
 		LoraSendMessage(buffer);
@@ -1208,8 +1234,8 @@ void setHandlers()
 	server.on("/index.js", HTTP_ANY, [](AsyncWebServerRequest* request)
 		{ request->send(SPIFFS, "/index.js"); });
 
-	server.on("/main.css", HTTP_ANY, [](AsyncWebServerRequest* request)
-		{ request->send(SPIFFS, "/main.css"); });
+	server.on("/index.css", HTTP_ANY, [](AsyncWebServerRequest* request)
+		{ request->send(SPIFFS, "/index.css"); });
 
 
 	server.serveStatic("/", SPIFFS, "/");
@@ -1258,7 +1284,8 @@ void WebSocketHandler(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsE
 #endif
 
 		String jsonString;
-		json_data["status"] = "Ready";
+		json_data["message"] = "connected";
+		json_data["status"] = "Initializing";
 		// json_data["message"] = "Hello Client (id) " + String(client->id());
 		serializeJson(json_data, jsonString);
 		client->text(jsonString);
