@@ -84,9 +84,13 @@ String ERROR_MESSAGES[10] = {
 //---- Flight Configuration -----
 #define ROCKET_NAME "Forte A11"
 
+#define JSON_SIZE 2048
 #define DEBUG DEBUG_WIFI //DEBUG_VERBOSE 
-#define USE_SD false //SD / SPIFFS
 
+
+
+
+#define USE_SD false //SD / SPIFFS
 
 //Flight Config
 #define ROCKET_GOAL                   500.0 //m
@@ -284,10 +288,10 @@ void SendJsonData();
 #include <ESPAsyncWebServer.h>
 #include <AsyncWebSocket.h>
 
+#define WIFI_MODE WIFI_AP_STA
+
 #define WIFI_START_MESSAGE "WiFi Started"
-#define JSON_SIZE 2048
-const char* ssid = "Catthoobias";
-const char* password = "elementanimais";
+
 
 void onWiFiDisconnect(WiFiEvent_t event);
 void WebSocketHandler(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len);
@@ -306,6 +310,14 @@ DynamicJsonDocument sensors(4096);
 void setHandlers();
 void init_Wifi();
 void onWiFiDisconnect(WiFiEvent_t event);
+
+
+const char* ssid = "Catthoobias";
+const char* password = "elementanimais";
+const char* AP_ssid = "APEX - Forte A-11 - UFSC";
+const char* AP_password = "";
+
+
 #endif
 
 void setup() {
@@ -1182,23 +1194,30 @@ String normalizePath(String path) {
 
 #if DEBUG == DEBUG_WIFI
 void init_Wifi() {
-	WiFi.mode(WIFI_STA);
-	WiFi.begin(ssid, password);
+	WiFi.mode(WIFI_MODE);
 
+#if WIFI_MODE == WIFI_AP || WIFI_MODE == WIFI_AP_STA
+	WiFi.softAP(AP_ssid, AP_password);
+	Log("IP Address: " + (WiFi.softAPIP().toString()), LOG_MESSAGE, false);
+#endif
+
+#if WIFI_MODE == WIFI_STA || WIFI_MODE == WIFI_AP_STA
+	WiFi.begin(ssid, password);
 	while (WiFi.waitForConnectResult() != WL_CONNECTED)
 	{
 		Log("WiFi Failed!", LOG_ERROR, false);
 		delay(1000);
 	}
-
 	WiFi.onEvent(onWiFiDisconnect, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+	Log("IP Address: " + (WiFi.localIP().toString()), LOG_MESSAGE, false);
+#endif
 
 	setHandlers();
 	DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
 	server.begin();
 
 	Log(WIFI_START_MESSAGE, true, false);
-	Log("IP Address: " + (WiFi.localIP().toString()), LOG_MESSAGE, false);
+
 }
 
 void onWiFiDisconnect(WiFiEvent_t event)
