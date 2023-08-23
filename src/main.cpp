@@ -796,6 +796,8 @@ void SendJsonData() {
 		data["sensors"]["sqrt_acceleration"]["name"] = "Sqrt Acceleration";
 		data["sensors"]["sqrt_acceleration"]["value"] = current_sqrt_acceleration;
 		data["sensors"]["sqrt_acceleration"]["unity"] = "m/s";
+		data["sensors"]["sqrt_acceleration"]["order"] = "8";
+
 	}
 
 
