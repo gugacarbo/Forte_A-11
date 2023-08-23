@@ -1,0 +1,7 @@
+{
+  "include": ["/"],
+  "source": "dist",
+  "userAgent": "react-simple-snap",
+  "minifyCss": true,
+  "concurrency": 8
+}
