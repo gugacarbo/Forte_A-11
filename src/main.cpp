@@ -84,7 +84,6 @@ String ERROR_MESSAGES[10] = {
 //---- Flight Configuration -----
 #define ROCKET_NAME "Forte A11"
 
-//Toggle Debug Serial Logs DEBUG_ON / DEBUG_VERBOSE / (DEBUG_OFF == DEBUG_LORA)
 #define DEBUG DEBUG_WIFI //DEBUG_VERBOSE 
 #define USE_SD false //SD / SPIFFS
 
@@ -330,13 +329,13 @@ void setup() {
 	}
 #endif
 
-#if DEBUG == DEBUG_WIFI
-	init_Wifi();
-#endif
-
 #if DEBUG == DEBUG_LORA //Serial Off
 	initLora();
 	delay(100);
+#endif
+
+#if DEBUG == DEBUG_WIFI
+	init_Wifi();
 #endif
 
 	beep(5, 75);
@@ -390,7 +389,6 @@ void loop() {
 		altitudeInterval_time = millis();
 	}
 }
-
 
 //Check if Rocket started to Rising
 void handle_FlightStart() {
