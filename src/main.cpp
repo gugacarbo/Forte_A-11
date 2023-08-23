@@ -9,6 +9,7 @@
 #include <MPU9250_asukiaaa.h>
 #include <TinyGPSPlus.h>
 #include <SPIFFS.h>
+#include <ArduinoJson.h>
 
 
 //---- System Defines -----
@@ -32,7 +33,19 @@
 #define FILE_WRITE_ERROR    7
 #define FILE_OPEN_ERROR     8
 #define UNKNOW_FILE_ERROR   9
-#define FILE_HEADER_ERROR   10
+
+String ERROR_MESSAGES[10] = {
+	"NoError"
+	"BMP280 init failed!",
+	"SD Mount init failed!",
+	"MPU9250 init failed!",
+	"NO SD",
+	"Erro ao Criar Diretorio",
+	"Erro ao Criar Arquivo",
+	"Erro ao Escrever no Arquivo",
+	"Erro ao Abrir Arquivo ",
+	"Arquivo Desconhecido Nao Encontrado",
+};
 
 //Log Messages
 #define SYSYEM_START_MESSAGE          "Avionic Board Starting"
@@ -82,9 +95,9 @@
 #define FLIGHT_START_VELOCITY         5.0  // m/s
 #define RECOVERY_DEPLOY_VELOCITY     -5.0  // -m/s
 #define RECOVERY_DEPLOY_MIN_ALTITUDE  400.0 //m
-#define RECOVER_AFTER_LAUNCH_MAX_TIME 11000 //ms
+#define RECOVER_AFTER_LAUNCH_MAX_TIME 15000 //ms
 
-#define RECOVERY_PIN               		22 // ? LED 2 Pin - Não tem Pino Definido
+#define RECOVERY_PIN               		27 // ou 26 
 
 //Battery
 #define BATTERY_MAX_VOLTAGE        		7.4 //V
@@ -99,7 +112,7 @@ const char* ALTITUDE_FILE_NAME = "/altitude";       //.csv
 const char* LOG_FILE_NAME = "/log"; 								//.csv
 
 #define DATA_FILE_HEADER "Tempo,Altitude,Temperatura,Pressao,latitude,longitude,Roll,Pitch,Yaw,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,Apogeu,Bateria\n"
-#define ALTITUDE_FILE_HEADER "Tempo,Altitude\n"
+#define ALTITUDE_FILE_HEADER "Tempo,Altitude,Apogeu\n"
 #define LOG_FILE_HEADER "Tempo,Tipo,Mensagem\n"
 
 //Sensors I2C (MPU, BMP280)
@@ -141,7 +154,7 @@ UART_BPS_RATE LORA_BAUDRATE = UART_BPS_RATE_9600;
 #define LORA_UaartParity        MODE_00_8N1                   //No Parity
 
 //BUZZER
-#define BUZZER_PIN              2  //Pin //?Está no IO34 que é Input Only
+#define BUZZER_PIN              26 //Pin Ou 27 //?Está no IO34 que é Input Only
 #define BUZZER_CHANNEL          1  //PWM CHANNEL
 #define BUZZER_BEEP_TIME        100 //ms
 #define BUZZER_BEEP_FREQUENCY   400 //Hz
@@ -197,7 +210,8 @@ unsigned long dataInterval_time = 0;
 unsigned long altitudeInterval_time = 0;
 
 //Objects
-LoRa_E32 LoraTransmitter(LORA_RX, LORA_TX, &Serial, LORA_AuxPin, LORA_BAUDRATE);
+LoRa_E32 LoraTransmitter(&Serial, LORA_AuxPin, LORA_BAUDRATE);
+// LoRa_E32 LoraTransmitter(LORA_RX, LORA_TX, &Serial, LORA_AuxPin, LORA_BAUDRATE);
 Adafruit_BMP280 bmp;
 TinyGPSPlus gps;
 MPU9250_asukiaaa mpu(0x68);
@@ -261,6 +275,7 @@ void activateRecovery();
 void handle_SerialPrintData();
 void LoraPrintParameter(struct Configuration configuration);
 void LoraSendMessage(String message);
+void SendJsonData();
 
 
 #if DEBUG == DEBUG_WIFI
@@ -269,7 +284,6 @@ void LoraSendMessage(String message);
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncWebSocket.h>
-#include <ArduinoJson.h>
 
 #define WIFI_START_MESSAGE "WiFi Started"
 #define JSON_SIZE 2048
@@ -280,7 +294,7 @@ void onWiFiDisconnect(WiFiEvent_t event);
 void WebSocketHandler(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventType type, void* arg, uint8_t* data, size_t len);
 void generateHTTPResponse(AsyncWebServerRequest* request, StaticJsonDocument<JSON_SIZE> data, int status = 200);
 void setHandlers();
-void sendDataWs();
+void sendDataWs(String message);
 
 
 AsyncWebServer server(80);
@@ -296,6 +310,10 @@ void onWiFiDisconnect(WiFiEvent_t event);
 #endif
 
 void setup() {
+	pinMode(RECOVERY_PIN, OUTPUT);
+	pinMode(BATTERY_SENSOR_PIN, INPUT);
+	pinMode(BUZZER_PIN, OUTPUT);
+
 #if DEBUG
 	Serial.begin(115200); //INICIALIZA A SERIAL
 	Serial.println("Started");
@@ -307,7 +325,7 @@ void setup() {
 	delay(400);
 #else
 	while (!SPIFFS.begin(true)) {
-		Serial.println("SPIFFS Mount Failed");
+		Log("SPIFFS Mount Failed", LOG_ERROR, false);
 		delay(250);
 	}
 #endif
@@ -320,11 +338,6 @@ void setup() {
 	initLora();
 	delay(100);
 #endif
-
-
-	pinMode(RECOVERY_PIN, OUTPUT);
-	pinMode(BATTERY_SENSOR_PIN, INPUT);
-	pinMode(BUZZER_PIN, OUTPUT);
 
 	beep(5, 75);
 	delay(200);
@@ -363,6 +376,8 @@ void loop() {
 		if (flightStarted || DEBUG) {
 			File_SaveFlightData();
 		}
+
+		SendJsonData();
 
 		dataInterval_time = millis();
 	}
@@ -715,6 +730,89 @@ void LoraSendMessage(String message) {
 	}
 }
 
+void SendJsonData() {
+	StaticJsonDocument<JSON_SIZE> data;
+	String buffer;
+
+	data["sensors"]["altitude"]["name"] = "Altitude";
+	data["sensors"]["altitude"]["value"] = current_altitude;
+	data["sensors"]["altitude"]["unity"] = "m";
+
+	data["sensors"]["temperature"]["name"] = "Temperature";
+	data["sensors"]["temperature"]["value"] = current_temperature;
+	data["sensors"]["temperature"]["unity"] = "°C";
+
+	data["sensors"]["pressure"]["name"] = "Pressure";
+	data["sensors"]["pressure"]["value"] = current_pressure;
+	data["sensors"]["pressure"]["unity"] = "hPa";
+
+	data["sensors"]["latitude"]["name"] = "Latitude";
+	data["sensors"]["latitude"]["value"] = latitude;
+	data["sensors"]["latitude"]["unity"] = "°";
+
+	data["sensors"]["longitude"]["name"] = "Longitude";
+	data["sensors"]["longitude"]["value"] = longitude;
+	data["sensors"]["longitude"]["unity"] = "°";
+
+	data["sensors"]["roll"]["name"] = "Roll";
+	data["sensors"]["roll"]["value"] = current_roll;
+	data["sensors"]["roll"]["unity"] = "°";
+
+	data["sensors"]["pitch"]["name"] = "Pitch";
+	data["sensors"]["pitch"]["value"] = current_pitch;
+	data["sensors"]["pitch"]["unity"] = "°";
+
+	data["sensors"]["yaw"]["name"] = "Yaw";
+	data["sensors"]["yaw"]["value"] = current_yaw;
+	data["sensors"]["yaw"]["unity"] = "°";
+
+	if (current_square_acceleration != 0) {
+		data["sensors"]["acceleration"]["name"] = "Acceleration";
+		data["sensors"]["acceleration"]["value"] = current_square_acceleration;
+		data["sensors"]["acceleration"]["unity"] = "m/s";
+	}
+
+
+	data["sensors"]["vertical_velocity"]["name"] = "Vertical Velocity";
+	data["sensors"]["vertical_velocity"]["value"] = calcVelocity();
+	data["sensors"]["vertical_velocity"]["unity"] = "m/s";
+
+	data["sensors"]["time"]["name"] = "Flight Time";
+	data["sensors"]["time"]["value"] = round(current_time / 1000.0);
+	data["sensors"]["time"]["unity"] = "s";
+
+
+	data["apoggee"] = apogee;
+
+	data["battery"] = "Battery";
+	data["battery"] = current_batteryCharge;
+	data["battery"] = "%";
+
+	if (!flightStarted) {
+		data["status"] = "Ready";
+	}
+
+	if (flightStarted) {
+		data["status"] = "Rising";
+
+		if (startRecovery) {
+			data["status"] = "Recovering";
+		}
+		else if (calcVelocity() < RECOVERY_DEPLOY_VELOCITY) {
+			data["status"] = "Falling";
+		}
+	}
+
+	serializeJson(data, buffer);
+
+#if DEBUG == DEBUG_WIFI
+	sendDataWs(buffer);
+#endif
+
+#if DEBUG == DEBUG_LORA
+	LoraSendMessage(buffer);
+#endif
+}
 //Save Data on SD 
 void File_SaveFlightData() {
 
@@ -739,13 +837,16 @@ void File_SaveFlightData() {
 		+ String(current_batteryCharge)
 		+ "\n";
 	appendToFile(current_fileSystem, dataFilePath.c_str(), dataMessage.c_str(), DATA_FILE_HEADER);
+
+
 }
 
 //Save Altitude on SD
 void File_SaveAltitude() {
 	String dataMessage =
 		String(current_time) + ","
-		+ String(current_altitude)
+		+ String(current_altitude) + ","
+		+ String(apogee)
 		+ "\n";
 	appendToFile(current_fileSystem, altitudeFilePath.c_str(), dataMessage.c_str(), ALTITUDE_FILE_HEADER);
 }
@@ -811,9 +912,7 @@ void handle_SerialPrintData() {
 #endif
 	Serial.print("\n");
 
-#if DEBUG == DEBUG_WIFI
-	sendDataWs();
-#endif
+
 #endif
 }
 
@@ -903,15 +1002,15 @@ void appendToFile(fs::FS& fs, const char* path, const char* message, String file
 	if (!fs.exists(path)) {
 		Log(UNKNOW_FILE_ERROR_MESSAGE + String(path), LOG_ERROR);
 		Error(UNKNOW_FILE_ERROR);
+		return;
 	}
 
 	File file = fs.open(path, FILE_APPEND);
 	if (!file) {
-		Log(OPEN_FILE_ERROR_MESSAGE + String(path), LOG_ERROR);
+		Log(OPEN_FILE_ERROR_MESSAGE + String(path), LOG_ERROR, false);
 		Error(FILE_OPEN_ERROR);
 		return;
 	}
-
 
 	if (!file.print(message)) {
 		Log(WRITE_FILE_ERROR_MESSAGE);
@@ -973,12 +1072,18 @@ void Log(const String& Message, bool isError, bool appendToLogFile) {
 		+ Message
 		+ "\n";
 
-
 #if DEBUG
 	Serial.println(Message);
-#else
-	LoraSendMessage(logMessage);
 #endif
+
+#if DEBUG == DEBUG_LORA
+	StaticJsonDocument<512> jsonMessage;
+	String buffer;
+	jsonMessage["log"] = Message;
+	serializeJson(jsonMessage, buffer);
+	LoraSendMessage(buffer);
+#endif
+
 	if (appendToLogFile) {
 		appendToFile(current_fileSystem, logFilePath.c_str(), logMessage.c_str(), LOG_FILE_HEADER);
 	}
@@ -998,6 +1103,17 @@ void Error(int e) {
 			delay(errorDelay * 2);
 		}
 		delay(errorDelay * 4);
+		StaticJsonDocument<512> jsonError;
+		jsonError["error"]["error_id"] = e;
+		jsonError["error"]["error_message"] = ERROR_MESSAGES[e];
+		String buffer;
+		serializeJson(jsonError, buffer);
+		LoraSendMessage(buffer);
+
+#if DEBUG == DEBUG_WIFI
+		sendDataWs(buffer);
+#endif
+
 	}
 
 }
@@ -1169,55 +1285,20 @@ void WebSocketHandler(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsE
 	}
 }
 
-void sendDataWs()
-{
+void sendDataWs(String message) {
 	ws.cleanupClients();
 	for (auto client : ws.getClients())
 	{
 		if (client->status() != WS_CONNECTED)
 		{
-			//Serial.println("Client has disconnected.");
-			//Serial.println("Removing.");
+#if DEBUG == DEBUG_VERBOSE
+			Serial.println("Client #" + client->id() + " has disconnected, Removing.");
+#endif
 			client->close();
 		}
 	}
-	String buffer;
-	StaticJsonDocument<JSON_SIZE> sensorsJson;
 
-	sensorsJson["sensors"]["alt"]["name"] = "Altitude";
-	sensorsJson["sensors"]["alt"]["value"] = current_altitude;
-	sensorsJson["sensors"]["alt"]["unity"] = "m";
-
-	sensorsJson["sensors"]["temp"]["name"] = "Temperature";
-	sensorsJson["sensors"]["temp"]["value"] = current_temperature;
-	sensorsJson["sensors"]["temp"]["unity"] = "°C";
-
-	sensorsJson["sensors"]["pressure"]["name"] = "Pressure";
-	sensorsJson["sensors"]["pressure"]["value"] = current_pressure;
-	sensorsJson["sensors"]["pressure"]["unity"] = "hPa";
-
-	sensorsJson["sensors"]["roll"]["name"] = "Roll";
-	sensorsJson["sensors"]["roll"]["value"] = current_roll;
-	sensorsJson["sensors"]["roll"]["unity"] = "°";
-
-	sensorsJson["sensors"]["pitch"]["name"] = "Pitch";
-	sensorsJson["sensors"]["pitch"]["value"] = current_pitch;
-	sensorsJson["sensors"]["pitch"]["unity"] = "°";
-
-	sensorsJson["sensors"]["yaw"]["name"] = "Yaw";
-	sensorsJson["sensors"]["yaw"]["value"] = current_yaw;
-	sensorsJson["sensors"]["yaw"]["unity"] = "°";
-
-	sensorsJson["sensors"]["latitude"]["name"] = "Latitude";
-	sensorsJson["sensors"]["latitude"]["value"] = latitude;
-	sensorsJson["sensors"]["latitude"]["unity"] = "";
-
-	sensorsJson["sensors"]["longitude"]["name"] = "Longitude";
-	sensorsJson["sensors"]["longitude"]["value"] = longitude;
-	sensorsJson["sensors"]["longitude"]["unity"] = "";
-
-	serializeJson(sensorsJson, buffer);
-	ws.textAll(buffer);
+	ws.textAll(message);
 }
 
 #endif
